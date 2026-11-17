@@ -67,6 +67,11 @@ fun GuardScreen(vm: AppViewModel, permissionMissing: Boolean, onStart: () -> Uni
     val glasses by vm.glasses.collectAsState()
     val vibrate by vm.alertVibrate.collectAsState()
     val glassesAlert = glasses.alerting
+    val logs by vm.pastLogs.collectAsState()
+    val context = LocalContext.current
+    val thisLog = logs.firstOrNull { it.id == session?.id }
+    var pastOpen by rememberSaveable { mutableStateOf(false) }
+    var confirmClearLogs by remember { mutableStateOf(false) }
     var logOpen by rememberSaveable { mutableStateOf(false) }
     var openGroup by remember { mutableStateOf<String?>(null) }
     var farOpen by rememberSaveable { mutableStateOf(false) }
@@ -112,7 +117,7 @@ fun GuardScreen(vm: AppViewModel, permissionMissing: Boolean, onStart: () -> Uni
                         GuardPanel {
                             Text("AI 안경 바로 탐지", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                             Text("수험생이 이미 앉아 있어도 바로 시작할 수 있습니다. Ray-Ban Meta·Oakley Meta 같은 AI 안경이 내는 블루투스 신호가 잡히면 맨 위에 빨간색으로 띄우고 진동으로 알립니다.", color = RfColors.textDim)
-                            GuardHowTo("1", "입실이 끝나면 바로 시작하고 시험이 끝날 때까지 화면을 켜 두기")
+                            GuardHowTo("1", "입실이 끝나면 바로 시작하고 시험이 끝날 때까지 끄지 않기 · 화면을 꺼서 주머니에 넣어도 진동으로 알림")
                             GuardHowTo("2", "안경을 켜거나 바꿔 쓰는 순간 신호가 잠깐 나옵니다. 사라져도 기록에 남습니다")
                             GuardHowTo("3", "신호가 뜨면 눌러서 걸으며 가까운 쪽을 찾고, 안경을 직접 확인")
                         }
@@ -128,6 +133,13 @@ fun GuardScreen(vm: AppViewModel, permissionMissing: Boolean, onStart: () -> Uni
                             OutlinedButton(onClick = { vm.useSavedBaseline(); onStart() }, modifier = Modifier.fillMaxWidth()) {
                                 Text("${dayClock(record.capturedAtMs)}에 저장한 빈 교실 기록으로 감시")
                             }
+                        }
+                    }
+                    if (logs.isNotEmpty()) {
+                        item(key = "past-logs") { FoldRow("지난 감시의 AI 안경 신호 기록 ${logs.size}건", pastOpen) { pastOpen = !pastOpen } }
+                        if (pastOpen) {
+                            items(logs, key = { "past-${it.id}" }) { log -> PastLogCard(log) { shareLog(context, log) } }
+                            item(key = "past-clear") { TextButton(onClick = { confirmClearLogs = true }) { Text("기록 모두 지우기", color = RfColors.textDim) } }
                         }
                     }
                 }
@@ -195,10 +207,10 @@ fun GuardScreen(vm: AppViewModel, permissionMissing: Boolean, onStart: () -> Uni
                     glassesItems(glasses, glassesAlert, logOpen, { logOpen = !logOpen }, tick, onFind)
                     if (watching) item { VibrateRow(vibrate, vm::setAlertVibrate) }
                     if (watching) {
-                        item { Text("이 화면이 켜져 있는 동안에만 감시합니다. 화면은 자동으로 꺼지지 않으니 전원 버튼을 누르거나 다른 앱으로 가지 마세요. 충전기를 꽂아 두면 좋습니다.${if (silenceMissing || simulation) "" else " 감시 중에는 전화·알림·알람이 울리지 않게 휴대폰을 무음으로 바꿔 둡니다."}", color = RfColors.textDim, style = MaterialTheme.typography.bodySmall) }
+                        item { Text("이어폰·와이파이 비교는 이 화면이 켜져 있는 동안에만 됩니다. 화면을 끄거나 다른 앱으로 가도 AI 안경 신호는 계속 받고 진동으로 알립니다. 충전기를 꽂아 두면 좋습니다.${if (silenceMissing || simulation) "" else " 감시 중에는 전화·알림·알람이 울리지 않게 휴대폰을 무음으로 바꿔 둡니다."}", color = RfColors.textDim, style = MaterialTheme.typography.bodySmall) }
                         problemItems(problems)
                         session?.takeIf { it.pauses > 0 }?.let {
-                            item { GuardNotice("앱을 벗어나 있던 시간이 있습니다", "${it.pauses}회, 총 ${minSec((it.pausedMs / 1000).toInt())} 동안은 전파를 받지 못했습니다. 화면을 끄거나 다른 앱을 쓰는 동안에는 감시가 멈추고, 돌아오면 자동으로 이어집니다.") }
+                            item { GuardNotice("앱을 벗어나 있던 시간이 있습니다", "${it.pauses}회, 총 ${minSec((it.pausedMs / 1000).toInt())} 동안은 이어폰·와이파이 비교를 하지 못했습니다. AI 안경 신호는 그동안에도 받았습니다. 돌아오면 비교도 자동으로 이어집니다.") }
                         }
                         item { GuardSectionTitle(RfSymbol.WIFI, "와이파이", if (watch.wifi.isEmpty()) "빈 교실에 없던 와이파이 없음" else "빈 교실에 없던 와이파이 ${watch.wifi.size}개") }
                         watch.wifi.forEach { group -> groupRows(group, openGroup == group.key, { toggle(group.key) }, onFind) }
@@ -235,6 +247,7 @@ fun GuardScreen(vm: AppViewModel, permissionMissing: Boolean, onStart: () -> Uni
                         Button(onClick = { confirmStop = true }, modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp), shape = RoundedCornerShape(16.dp),
                             colors = ButtonDefaults.buttonColors(containerColor = RfColors.surfaceAlt, contentColor = RfColors.textPrimary)) { Text("감시 끝내기", fontWeight = FontWeight.Bold) }
                     } else {
+                        thisLog?.let { log -> OutlinedButton(onClick = { shareLog(context, log) }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp), shape = RoundedCornerShape(16.dp)) { Text("이번 안경 신호 기록 보내기") } }
                         MainButton("다시 바로 탐지", onClick = onStartQuick)
                         OutlinedButton(onClick = { vm.exitQuick() }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp), shape = RoundedCornerShape(16.dp)) { Text("처음 화면으로") }
                     }
@@ -246,6 +259,7 @@ fun GuardScreen(vm: AppViewModel, permissionMissing: Boolean, onStart: () -> Uni
                             colors = ButtonDefaults.buttonColors(containerColor = RfColors.surfaceAlt, contentColor = RfColors.textPrimary)) { Text("감시 끝내기", fontWeight = FontWeight.Bold) }
                     }
                     GuardPhase.ENDED -> {
+                        thisLog?.let { log -> OutlinedButton(onClick = { shareLog(context, log) }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp), shape = RoundedCornerShape(16.dp)) { Text("이번 안경 신호 기록 보내기") } }
                         MainButton("같은 빈 교실 기록으로 다시 감시", onClick = onStart)
                         OutlinedButton(onClick = { vm.resetBaseline() }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp), shape = RoundedCornerShape(16.dp)) { Text("빈 교실부터 다시 측정") }
                     }
@@ -258,6 +272,10 @@ fun GuardScreen(vm: AppViewModel, permissionMissing: Boolean, onStart: () -> Uni
         text = { Text("지금의 빈 교실 기록과 목록을 비우고 2분 측정부터 다시 합니다.\n\n수험생이 있는 상태에서 다시 측정하면 수험생의 기기가 원래 있던 전파로 기록되어, 이후에는 알리지 않습니다.") },
         confirmButton = { TextButton(onClick = { confirmRestart = false; if (blocked) { vm.stopScan(); vm.resetBaseline() } else vm.restartFromEmptyRoom() }) { Text("다시 측정") } },
         dismissButton = { TextButton(onClick = { confirmRestart = false }) { Text("취소") } })
+    if (confirmClearLogs) AlertDialog(onDismissRequest = { confirmClearLogs = false }, title = { Text("지난 기록을 모두 지울까요?") },
+        text = { Text("지운 기록은 되살릴 수 없습니다. 시험 뒤 사실 확인에 필요할 수 있으니, 필요하면 먼저 보내 두세요.") },
+        confirmButton = { TextButton(onClick = { confirmClearLogs = false; vm.clearPastLogs() }) { Text("지우기") } },
+        dismissButton = { TextButton(onClick = { confirmClearLogs = false }) { Text("취소") } })
     if (confirmStop) AlertDialog(onDismissRequest = { confirmStop = false }, title = { Text("감시를 끝낼까요?") },
         text = { Text(if (quick) "끝내면 전파를 더 받지 않습니다. 이번에 잡힌 안경 신호 기록은 처음 화면으로 돌아가기 전까지 남아 있습니다." else "끝내면 전파를 더 받지 않습니다. 빈 교실 기록은 남아 있어 같은 기록으로 다시 감시할 수 있습니다.") },
         confirmButton = { TextButton(onClick = { confirmStop = false; vm.stopScan() }) { Text("끝내기") } },
@@ -352,7 +370,7 @@ fun GuideScreen() {
                 Text("AI 안경 탐지", fontWeight = FontWeight.Bold, color = alarm)
                 Text("AI 안경이 내보내는 블루투스 신호의 회사 코드(Luxottica·Meta·Snap 등), 안경 종류 값, 제품명(Ray-Ban Meta, 갤럭시 글래스, Rokid, RayNeo 등)으로 알아봅니다. 빈 교실 기록이 없어도 바로 알립니다.", style = MaterialTheme.typography.bodyMedium)
                 GuideList(
-                    "Ray-Ban Meta 2세대는 휴대폰과 연결되면 신호를 멈춘다고 알려져 있습니다. 켜는 순간, 다시 연결하는 순간에 잠깐 잡히므로 입실 때부터 시험이 끝날 때까지 화면을 켜 두세요.",
+                    "Ray-Ban Meta 2세대는 휴대폰과 연결되면 신호를 멈춘다고 알려져 있습니다. 켜는 순간, 다시 연결하는 순간에 잠깐 잡히므로 입실 때부터 시험이 끝날 때까지 감시를 끄지 마세요.",
                     "검사 뒤에 안경을 바꿔 쓰는 경우가 실제로 있었습니다. 시험 시작 직후와 쉬는 시간 뒤에 기록을 꼭 확인하세요.",
                     "신호는 흉내 낼 수 있고, 옆 교실·복도의 안경도 잡힙니다. 경보는 안경을 직접 확인하라는 표시일 뿐 증거가 아닙니다.",
                     "갤럭시 글래스·중국산 안경은 이름으로만 알아봅니다. 이름을 알리지 않으면 놓칠 수 있습니다.",
@@ -367,11 +385,11 @@ fun GuideScreen() {
             GuardHowTo("3", "줄을 눌러 걸어가며 막대가 늘어나는 쪽을 찾습니다.")
         }
         GuardPanel {
-            Text("시험 중에는 화면을 끄지 마세요", fontWeight = FontWeight.Bold)
-            Text("이 앱은 화면에 떠 있는 동안에만 전파를 받습니다. 측정과 감시 중에는 화면이 자동으로 꺼지지 않습니다.", style = MaterialTheme.typography.bodyMedium)
+            Text("화면이 꺼지면 무엇이 달라지나요", fontWeight = FontWeight.Bold)
+            Text("AI 안경 신호(회사 코드·서비스 코드)는 화면을 꺼도 계속 받고 진동과 알림으로 알립니다. 이어폰·워치·와이파이 비교와 이름으로만 알아보는 안경은 화면이 켜져 있을 때만 됩니다. 측정과 감시 중에는 화면이 자동으로 꺼지지 않습니다.", style = MaterialTheme.typography.bodyMedium)
             GuideList("전원 버튼을 누르지 않습니다.", "다른 앱으로 가거나 홈 화면으로 나가지 않습니다.", "전화가 와서 화면이 바뀌지 않게 비행기 모드를 켜고, 블루투스와 와이파이만 다시 켭니다.", "화면을 계속 켜 두면 배터리가 빨리 닳으니 충전기를 연결하고 밝기를 낮춥니다.")
             Text("측정과 감시 중에는 전화·알림·알람이 울리지 않게 앱이 휴대폰을 무음(방해 금지)으로 바꾸고, 끝내면 원래대로 돌립니다. 권한, 비행기 모드, 와이파이·블루투스·위치 중 하나라도 빠져 있으면 ‘시작 전 준비’ 화면이 먼저 나오고, 모두 마쳐야 측정을 시작할 수 있습니다. 위치 찾기의 진동은 그대로 울립니다.", style = MaterialTheme.typography.bodyMedium)
-            Text("화면이 꺼지거나 앱을 벗어난 동안의 전파는 기록되지 않습니다. 돌아오면 감시를 자동으로 이어 가고, 비어 있던 횟수와 시간을 감시 화면에 표시합니다.", color = RfColors.textDim, style = MaterialTheme.typography.bodySmall)
+            Text("잡힌 안경 신호는 앱이 꺼져도 휴대폰에 남습니다. 첫 화면의 ‘지난 감시의 AI 안경 신호 기록’에서 보고 문자·메신저로 보낼 수 있습니다. 보내는 글에는 기기 이름과 주소를 넣지 않습니다.", color = RfColors.textDim, style = MaterialTheme.typography.bodySmall)
         }
         GuardPanel {
             Text("제대로 잡히는지 확인하기", fontWeight = FontWeight.Bold)
@@ -836,7 +854,7 @@ private fun LazyListScope.quickItems(vm: AppViewModel, scanning: Boolean, glasse
                 if (scanning) Text(when {
                     found -> "AI 안경이 내는 블루투스 신호가 잡혔습니다. 빨간 줄을 눌러 걸으며 막대가 늘어나는 쪽을 찾고, 안경을 직접 확인하세요."
                     incomplete -> "아래 문제를 해결하기 전까지는 안경이 있어도 표시되지 않을 수 있습니다."
-                    else -> "휴대폰과 이미 연결된 안경은 신호를 멈출 수 있습니다. 안경을 켜거나 바꿔 쓰는 순간을 잡으려면 시험이 끝날 때까지 이 화면을 켜 두세요."
+                    else -> "휴대폰과 이미 연결된 안경은 신호를 멈출 수 있습니다. 안경을 켜거나 바꿔 쓰는 순간을 잡으려면 시험이 끝날 때까지 감시를 끄지 마세요. 화면을 꺼서 주머니에 넣어도 진동으로 알립니다."
                 }, color = RfColors.textDim, style = MaterialTheme.typography.bodySmall)
             }
         }
@@ -848,7 +866,7 @@ private fun LazyListScope.quickItems(vm: AppViewModel, scanning: Boolean, glasse
     if (scanning) {
         item(key = "quick-vibrate") { VibrateRow(vibrate, vm::setAlertVibrate) }
         session?.takeIf { it.pauses > 0 }?.let {
-            item(key = "quick-paused") { GuardNotice("앱을 벗어나 있던 시간이 있습니다", "${it.pauses}회, 총 ${minSec((it.pausedMs / 1000).toInt())} 동안은 전파를 받지 못했습니다. 그동안 켜진 안경은 놓쳤을 수 있습니다.") }
+            item(key = "quick-paused") { GuardNotice("화면이 꺼져 있던 시간이 있습니다", "${it.pauses}회, 총 ${minSec((it.pausedMs / 1000).toInt())}. 그동안에도 AI 안경 신호는 받았지만 와이파이는 받지 못했습니다. 이름으로만 알아보는 안경(갤럭시 글래스·중국산 등)은 화면이 꺼진 동안 놓칠 수 있습니다.") }
         }
         val transfer = devices.filter { it.transferWifi && it.presence != SignalPresence.HISTORY }.sortedByDescending { it.rssiEma ?: Double.NEGATIVE_INFINITY }
         item(key = "quick-wifi-title") { GuardSectionTitle(RfSymbol.WIFI, "와이파이", if (transfer.isEmpty()) "휴대폰 핫스팟·와이파이 다이렉트 없음" else "휴대폰 핫스팟·와이파이 다이렉트 ${transfer.size}개") }
@@ -861,4 +879,28 @@ private fun LazyListScope.quickItems(vm: AppViewModel, scanning: Boolean, glasse
                 color = RfColors.textDim, style = MaterialTheme.typography.bodySmall)
         }
     }
+}
+
+@Composable
+private fun PastLogCard(log: GlassesLogSession, onShare: () -> Unit) {
+    val strong = log.entries.count { it.confidence == GlassesConfidence.STRONG }
+    Surface(color = RfColors.surface, shape = RoundedCornerShape(16.dp)) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(Modifier.weight(1f)) {
+                Text("${dayClock(log.startedAtMs)} · ${if (log.quick) "바로 탐지" else "빈 교실 비교"}", fontWeight = FontWeight.SemiBold)
+                Text(if (log.entries.isEmpty()) "안경 신호 없음" else "안경 신호 ${log.entries.size}건" + if (strong < log.entries.size) " (확실 $strong)" else "",
+                    color = if (log.entries.isEmpty()) RfColors.textDim else alarm, style = MaterialTheme.typography.bodySmall)
+                if (log.endedAtMs == null) Text("끝나기 전에 앱이 닫힌 감시", color = RfColors.textDim, style = MaterialTheme.typography.labelSmall)
+            }
+            TextButton(onClick = onShare) { Text("보내기") }
+        }
+    }
+}
+
+/** 기록을 문자·메신저·메일로 보낸다. 앱은 인터넷을 쓰지 않고, 보낼 곳은 감독관이 고른다. */
+private fun shareLog(context: android.content.Context, log: GlassesLogSession) {
+    val send = android.content.Intent(android.content.Intent.ACTION_SEND).setType("text/plain")
+        .putExtra(android.content.Intent.EXTRA_SUBJECT, "KoriyoSCAN AI 안경 신호 기록")
+        .putExtra(android.content.Intent.EXTRA_TEXT, log.shareText())
+    runCatching { context.startActivity(android.content.Intent.createChooser(send, "기록 보내기")) }
 }

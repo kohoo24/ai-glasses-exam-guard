@@ -2,6 +2,7 @@ package com.classroom.rfdetector.scanner
 
 import android.bluetooth.BluetoothManager
 import android.bluetooth.le.ScanCallback
+import android.bluetooth.le.ScanFilter
 import android.bluetooth.le.ScanResult
 import android.bluetooth.le.ScanSettings
 import android.content.Context
@@ -39,8 +40,17 @@ class BleScanner(context: Context) {
 
     fun isUsable(): Boolean = try { adapter?.isEnabled == true } catch (_: SecurityException) { false }
 
-    fun start(onObs: (RfObservation) -> Unit): Boolean {
+    /** 화면이 꺼져 있을 때 Android는 조건 없는 탐색 결과를 주지 않는다. 그때는 안경 신호 조건(filters)으로만 탐색한다. */
+    private var filters: List<ScanFilter>? = null
+
+    fun start(onObs: (RfObservation) -> Unit): Boolean = startWith(null, onObs)
+
+    /** 안경 신호 조건으로만 받는다. 화면이 꺼진 동안 쓴다. */
+    fun startFiltered(filters: List<ScanFilter>, onObs: (RfObservation) -> Unit): Boolean = startWith(filters, onObs)
+
+    private fun startWith(filters: List<ScanFilter>?, onObs: (RfObservation) -> Unit): Boolean {
         stop()
+        this.filters = filters
         lastReceivedAtMs = null
         lastError = null
         val ad = adapter ?: return fail("블루투스 기능이 없는 기기입니다")
@@ -95,7 +105,7 @@ class BleScanner(context: Context) {
         return try {
             callback = cb
             active = true
-            scanner.startScan(null, scanSettings(), cb)
+            scanner.startScan(filters, scanSettings(), cb)
             scanStartedAtElapsedMs = SystemClock.elapsedRealtime()
             if (active) handler.postDelayed(refresh, CHECK_MS)
             active
@@ -131,7 +141,7 @@ class BleScanner(context: Context) {
         try {
             val scanner = adapter?.bluetoothLeScanner ?: run { fail("블루투스 상태가 바뀌었습니다 · 다시 시작하세요"); return }
             scanner.stopScan(cb)
-            scanner.startScan(null, scanSettings(), cb)
+            scanner.startScan(filters, scanSettings(), cb)
             scanStartedAtElapsedMs = SystemClock.elapsedRealtime()
             handler.postDelayed(refresh, CHECK_MS)
         } catch (_: SecurityException) {

@@ -52,6 +52,8 @@ fun App() {
     /** 권한 창이 닫힌 뒤 시작할 감시. null이면 없음, true면 AI 안경 바로 탐지. */
     var pendingStart by remember { mutableStateOf<Boolean?>(null) }
     val needed = remember { vm.requiredPermissions() }
+    // 화면이 꺼진 동안 안경 신호 알림을 띄우는 데 쓴다. 거절해도 감시와 진동은 동작하므로 필수는 아니다.
+    val asked = remember { needed + if (android.os.Build.VERSION.SDK_INT >= 33) listOf("android.permission.POST_NOTIFICATIONS") else emptyList() }
     fun hasPermissions() = needed.all { ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED }
     var allGranted by remember { mutableStateOf(hasPermissions()) }
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
@@ -82,7 +84,7 @@ fun App() {
     val openSettings = { context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.parse("package:${context.packageName}"))) }
     fun begin(quick: Boolean) {
         if (simMode || hasPermissions()) { if (quick) vm.startQuick() else vm.startScan() }
-        else { pendingStart = quick; launcher.launch(needed.toTypedArray()) }
+        else { pendingStart = quick; launcher.launch(asked.toTypedArray()) }
     }
     val start = { begin(quick = false) }
     val startQuick = { begin(quick = true) }
@@ -102,7 +104,7 @@ fun App() {
                 when {
                     key != null -> FindScreen(vm, key, onBack = { findKey = null })
                     guide -> GuideScreen()
-                    else -> GuardScreen(vm, !allGranted, start, startQuick, { launcher.launch(needed.toTypedArray()) }, openSettings, onFind = { findKey = it })
+                    else -> GuardScreen(vm, !allGranted, start, startQuick, { launcher.launch(asked.toTypedArray()) }, openSettings, onFind = { findKey = it })
                 }
             }
         }

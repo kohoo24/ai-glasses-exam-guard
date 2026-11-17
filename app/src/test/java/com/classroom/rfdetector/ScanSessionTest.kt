@@ -106,4 +106,30 @@ class ScanSessionTest {
         // 가상 전파로 저장한 기록은 실제 감시에 이어 쓰지 않는다.
         assertNull(newViewModel().savedBaseline.value)
     }
+
+    private fun glassesAt(timeMs: Long) = com.classroom.rfdetector.core.RfObservation("EE:00:00:00:00:01", com.classroom.rfdetector.core.ScanSource.BLE,
+        null, -58, null, false, timeMs, manufacturerIds = setOf(0x0D53))
+
+    @Test fun aiGlassesReceivedWhileTheScreenIsOffAreRecordedAndAlerted() {
+        vm.stopScan()
+        vm.startQuick()
+        shadowOf(Looper.getMainLooper()).idle()
+        vm.pauseForBackground() // 화면을 껐다.
+        assertFalse(vm.scanning.value)
+        vm.onBackgroundObservation(glassesAt(System.currentTimeMillis()))
+        shadowOf(Looper.getMainLooper()).idle()
+        assertEquals(1, vm.glasses.value.size)
+        assertEquals(1, vm.glasses.value.filter { it.live && !it.acknowledged }.size)
+        // 화면을 다시 켜도 같은 감시가 이어지고 기록은 남는다.
+        vm.resumeFromBackground()
+        assertTrue(vm.scanning.value)
+        assertEquals(1, vm.glasses.value.size)
+    }
+
+    @Test fun signalsAfterAManualStopAreIgnored() {
+        vm.stopScan()
+        vm.onBackgroundObservation(glassesAt(System.currentTimeMillis()))
+        shadowOf(Looper.getMainLooper()).idle()
+        assertTrue(vm.glasses.value.isEmpty())
+    }
 }

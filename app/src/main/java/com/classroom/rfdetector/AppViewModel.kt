@@ -10,7 +10,10 @@ import com.classroom.rfdetector.core.DeviceIdentityResolver
 import com.classroom.rfdetector.core.DeviceTracker
 import com.classroom.rfdetector.core.DistanceClass
 import com.classroom.rfdetector.core.GeigerController
+import com.classroom.rfdetector.core.GlassesLogSession
+import com.classroom.rfdetector.core.GlassesLogStore
 import com.classroom.rfdetector.core.GlassesSighting
+import com.classroom.rfdetector.core.toLogEntry
 import com.classroom.rfdetector.core.alerting
 import com.classroom.rfdetector.core.glassesSightings
 import com.classroom.rfdetector.core.RfObservation
@@ -27,6 +30,7 @@ import com.classroom.rfdetector.core.baselineSamples
 import com.classroom.rfdetector.core.baselineWifiAddresses
 import com.classroom.rfdetector.core.watchView
 import com.classroom.rfdetector.scanner.BleScanner
+import com.classroom.rfdetector.scanner.GlassesWatchService
 import com.classroom.rfdetector.scanner.WifiScanner
 import com.classroom.rfdetector.sim.RadioSimulator
 import kotlinx.coroutines.CancellationException
@@ -48,7 +52,7 @@ import java.util.concurrent.Executors
 /** 감시가 완전하지 않은 이유. 해결 전까지는 해당 전파가 있어도 표시되지 않는다. */
 enum class RadioProblem { BLUETOOTH_OFF, WIFI_OFF, LOCATION_OFF }
 
-/** 빈 교실 기록 → 시험 중 감시의 상태를 화면 재생성과 무관하게 유지한다. 화면 밖에서는 수신을 멈춘다. */
+/** 빈 교실 기록 → 시험 중 감시의 상태를 화면 재생성과 무관하게 유지한다. 화면 밖에서는 AI 안경 신호만 받는다. */
 class AppViewModel(private val app: Context) : ViewModel() {
     companion object {
         private val archiveDispatcher = Executors.newSingleThreadExecutor { task -> Thread(task, "rf-archive").apply { isDaemon = true } }.asCoroutineDispatcher()
@@ -107,6 +111,15 @@ class AppViewModel(private val app: Context) : ViewModel() {
     val alertVibrate = MutableStateFlow(true)
     /** 이미 진동으로 알린 안경 신호(trackingKey). 같은 신호로 되풀이해 울리지 않는다. */
     private val alerted = mutableSetOf<String>()
+    /** 화면이 꺼진 동안 안경 신호 조건으로 블루투스를 받고 있다. */
+    val backgroundWatching = MutableStateFlow(false)
+    /** 화면이 꺼진 동안 받은 안경 신호(trackingKey). 기록에 표시한다. */
+    private val backgroundKeys = mutableSetOf<String>()
+    /** 지난 감시들의 안경 신호 기록. 최근 것이 먼저다. */
+    val pastLogs = MutableStateFlow<List<GlassesLogSession>>(emptyList())
+    private val glassesLog = GlassesLogStore(app.filesDir)
+    private var savedLogSignature = ""
+    private var logSavedAtMs = 0L
     private var pausedAtMs: Long? = null
     private val silent = SilentMode(app)
     /** 방해 금지 권한이 없어 휴대폰을 자동으로 무음으로 바꾸지 못하는 상태. */
@@ -127,6 +140,9 @@ class AppViewModel(private val app: Context) : ViewModel() {
                 }
                 DeviceIdentityResolver(rows("mac-vendors.tsv"), rows("bluetooth-companies.tsv").mapKeys { it.key.toInt() })
             }
+        }
+        scope.launch {
+            pastLogs.value = runCatching { withContext(archiveDispatcher) { glassesLog.load() } }.getOrDefault(emptyList())
         }
         scope.launch {
             try {
@@ -187,6 +203,19 @@ class AppViewModel(private val app: Context) : ViewModel() {
         if (!scanning.value) return
         stopScan(keepSilent = true)
         pausedAtMs = System.currentTimeMillis()
+        // 화면이 꺼져도 AI 안경 신호는 계속 받는다. 이어폰·와이파이 비교는 멈춘다.
+        if (!simMode.value) backgroundWatching.value = GlassesWatchService.instance?.watchInBackground(::onBackgroundObservation) == true
+        saveLog(force = true)
+    }
+
+    /** 화면이 꺼진 동안 받은 안경 신호. 메인 스레드에서 처리한다. */
+    fun onBackgroundObservation(obs: RfObservation) {
+        scope.launch {
+            if (pausedAtMs == null || closed) return@launch
+            tracker.update(obs)
+            backgroundKeys += obs.trackingKey
+            refresh()
+        }
     }
 
     fun resumeFromBackground() {
@@ -196,6 +225,8 @@ class AppViewModel(private val app: Context) : ViewModel() {
     private fun begin(resumedPauseAtMs: Long?) {
         if (scanning.value || closed) return
         pausedAtMs = null
+        GlassesWatchService.instance?.stopBackground()
+        backgroundWatching.value = false
         val paused = scanSession.value?.takeIf { resumedPauseAtMs != null }
         if (paused != null) {
             scanSession.value = paused.copy(pauses = paused.pauses + 1,
@@ -205,6 +236,8 @@ class AppViewModel(private val app: Context) : ViewModel() {
             glassesConfirmed.value = emptySet()
             glasses.value = emptyList()
             alerted.clear()
+            backgroundKeys.clear()
+            savedLogSignature = ""
             tracker.clear()
             _devices.value = emptyList()
             watch.value = WatchView()
@@ -224,7 +257,10 @@ class AppViewModel(private val app: Context) : ViewModel() {
         } else {
             if (ble.isUsable()) ble.start(::onObservation)
             wifi.start(::onObservation)
+            // 화면이 보이는 지금 시작해 둔다. 화면 밖에서는 Android가 시작을 막는다.
+            GlassesWatchService.start(app)
         }
+        if (paused == null) saveLog(force = true)
         refreshJob = scope.launch {
             while (isActive) {
                 refresh()
@@ -249,7 +285,13 @@ class AppViewModel(private val app: Context) : ViewModel() {
 
     /** keepSilent: 앱을 잠시 벗어난 동안에도 시험 중이므로 무음을 유지한다. */
     fun stopScan(keepSilent: Boolean = false) {
-        if (!keepSilent) silent.off()
+        if (!keepSilent) {
+            silent.off()
+            GlassesWatchService.stop(app)
+            backgroundWatching.value = false
+            // 화면 밖에서 끝낸 경우(앱을 닫음)에도 기록을 마무리한다.
+            if (!scanning.value && pausedAtMs != null) { pausedAtMs = null; saveLog(force = true, ended = true) }
+        }
         if (!scanning.value) return
         refresh()
         scanning.value = false
@@ -258,6 +300,35 @@ class AppViewModel(private val app: Context) : ViewModel() {
         ble.stop()
         wifi.stop()
         if (geigerOn.value) setGeiger(false)
+        if (!keepSilent) saveLog(force = true, ended = true)
+    }
+
+    /**
+     * 이번 감시의 안경 신호 기록을 휴대폰에 저장한다. 바뀐 것이 있을 때 3초에 한 번까지만 쓴다.
+     * 가상 전파(자동 테스트)는 저장하지 않는다.
+     */
+    private fun saveLog(force: Boolean = false, ended: Boolean = false) {
+        if (simMode.value || closed && !ended) return
+        val session = scanSession.value ?: return
+        val now = System.currentTimeMillis()
+        val entries = glasses.value.map { it.toLogEntry(it.device.trackingKey in backgroundKeys) }
+        val signature = entries.joinToString { "${it.address}:${it.lastSeenMs}:${it.acknowledged}" } + ended
+        if (!force && (signature == savedLogSignature || now - logSavedAtMs < 3_000)) return
+        savedLogSignature = signature
+        logSavedAtMs = now
+        val record = GlassesLogSession(session.id, session.startedAtMs, if (ended) now else null, quickMode.value, entries)
+        storageScope.launch {
+            val all = runCatching { glassesLog.upsert(record) }.getOrNull() ?: return@launch
+            withContext(Dispatchers.Main.immediate) { pastLogs.value = all }
+        }
+    }
+
+    /** 지난 감시 기록을 모두 지운다. */
+    fun clearPastLogs() {
+        storageScope.launch {
+            runCatching { glassesLog.clear() }
+            withContext(Dispatchers.Main.immediate) { pastLogs.value = emptyList() }
+        }
     }
 
     private fun applyBaseline() {
@@ -371,7 +442,12 @@ class AppViewModel(private val app: Context) : ViewModel() {
         val sightings = glassesSightings(list, glassesConfirmed.value, baselineGroups)
         glasses.value = sightings
         val fresh = sightings.alerting.map { it.device.trackingKey }.filter { alerted.add(it) }
-        if (fresh.isNotEmpty() && scanning.value && alertVibrate.value) geiger.alertPulse()
+        val watching = scanning.value || pausedAtMs != null
+        if (fresh.isNotEmpty() && watching) {
+            if (alertVibrate.value) geiger.alertPulse()
+            if (pausedAtMs != null) GlassesWatchService.instance?.notifyGlasses(sightings.alerting.size)
+        }
+        if (watching) saveLog()
         geiger.setClass(list.firstOrNull { it.trackingKey == findTarget.value && it.presence == SignalPresence.RECENT }?.distanceClass ?: DistanceClass.UNKNOWN)
         // 설정 상태 확인은 1초에 한 번이면 충분하다.
         if (now - problemsCheckedAtMs >= 1_000) {
@@ -390,6 +466,7 @@ class AppViewModel(private val app: Context) : ViewModel() {
 
     fun shutdown() {
         stopScan()
+        GlassesWatchService.stop(app)
         closed = true
         scope.cancel()
     }
