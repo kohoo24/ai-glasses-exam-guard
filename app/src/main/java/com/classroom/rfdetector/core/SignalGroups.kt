@@ -13,7 +13,8 @@ fun signalGroupKey(source: ScanSource, address: String, name: String, manufactur
     val advertised = advertisedName(address, name)
     return when {
         advertised != null -> "${source.name}:name:${advertised.lowercase(Locale.ROOT)}"
-        source == ScanSource.WIFI -> "WIFI:hidden"
+        // 이름을 숨긴 와이파이는 서로 다른 기기일 수 있으므로 주소별로 본다. 같은 공유기의 다른 주소는 isSameAccessPoint가 거른다.
+        source == ScanSource.WIFI -> "WIFI:hidden:${address.uppercase(Locale.ROOT)}"
         manufacturerIds.isEmpty() && hints.isEmpty() -> "BLE:unknown"
         else -> "BLE:kind:${manufacturerIds.sorted().joinToString(",")}:${hints.primary?.name.orEmpty()}"
     }
@@ -45,7 +46,7 @@ data class KnownGroup(val key: String, val sample: SnapshotSignal?, val baseline
 
 /** 빈 교실 기록의 묶음별 대표를 고정된 순서로: 와이파이 먼저, 그 안에서는 기록 당시 센 순서. */
 fun baselineSamples(baseline: SignalSnapshot): List<SnapshotSignal> = baseline.signals
-    .filterNot { it.source == ScanSource.BLE && it.hints.primary == SignalHint.APPLE_FIND_MY }
+    .filterNot { (it.source == ScanSource.BLE && it.hints.primary == SignalHint.APPLE_FIND_MY) || it.glasses != null }
     .groupBy { it.groupKey }.values.map { group -> group.maxBy { it.rssi ?: Double.NEGATIVE_INFINITY } }
     .sortedWith(compareBy<SnapshotSignal> { it.source != ScanSource.WIFI }.thenByDescending { it.rssi ?: Double.NEGATIVE_INFINITY }.thenBy { it.groupKey })
 
@@ -74,9 +75,14 @@ fun isSameAccessPoint(address: String, baselineWifi: Set<String>): Boolean {
     return baselineWifi.any { known -> known.length == 17 && (known.substring(3) == candidate.substring(3) || known.dropLast(2) == candidate.dropLast(2)) }
 }
 
-fun watchView(devices: List<TrackedDevice>, baseline: Map<String, Int>, acknowledged: Set<String>, nowMs: Long, baselineWifi: Set<String> = emptySet(),
+/**
+ * acknowledged: 감독관이 "확인함"으로 표시한 묶음과 그때 잡히던 개수. 확인한 개수까지만 원래 있던 것으로 보고,
+ * 그보다 늘어나면 다시 알린다. 묶음 전체를 끄지 않는다.
+ */
+fun watchView(devices: List<TrackedDevice>, baseline: Map<String, Int>, acknowledged: Map<String, Int>, nowMs: Long, baselineWifi: Set<String> = emptySet(),
     samples: List<SnapshotSignal> = emptyList()): WatchView {
-    val live = devices.filter { it.presence != SignalPresence.HISTORY }
+    // AI 안경 신호는 빈 교실 기록과 상관없이 따로 알린다(glassesSightings). 여기서는 다루지 않는다.
+    val live = devices.filter { it.presence != SignalPresence.HISTORY && it.glasses == null }
     // 전원을 끈 아이폰과 에어태그가 내는 신호. 제출한 휴대폰 수만큼 잡힐 수 있어 알리지 않고 따로 센다.
     val (findMy, others) = live.partition { it.source == ScanSource.BLE && it.hints.primary == SignalHint.APPLE_FIND_MY }
     // 이름을 숨긴 것까지 포함해, 빈 교실에 있던 공유기가 뒤늦게 내보인 다른 주소는 원래 있던 것이다.
@@ -84,11 +90,14 @@ fun watchView(devices: List<TrackedDevice>, baseline: Map<String, Int>, acknowle
     val flagged = mutableListOf<SignalGroup>()
     rest.groupBy { it.groupKey }.forEach { (key, members) ->
         val sorted = members.sortedByDescending { it.rssiEma ?: Double.NEGATIVE_INFINITY }
-        val before = baseline[key] ?: 0
+        val recorded = baseline[key] ?: 0
+        val confirmed = acknowledged[key]
+        val before = maxOf(recorded, confirmed ?: 0)
         val wifi = sorted.first().source == ScanSource.WIFI
         val established = members.count { nowMs - (it.periods.lastOrNull()?.firstSeenMs ?: it.firstSeenMs) >= ESTABLISHED_MS }
         val group = when {
-            key in acknowledged -> null
+            // 확인한 와이파이는 주소가 바뀌지 않으므로 그때보다 늘어날 때만 다시 알린다.
+            confirmed != null && wifi -> if (members.size > before) SignalGroup(key, sorted, before, alert = true) else null
             // 빈 교실에 없던 묶음은 바로 보인다. 와이파이 주소는 바뀌지 않으므로 바로 알린다.
             before == 0 -> SignalGroup(key, sorted, 0, alert = wifi || established > 0)
             // 같은 이름의 와이파이는 주소가 몇 개든 원래 있던 것이다.
@@ -113,10 +122,10 @@ fun watchView(devices: List<TrackedDevice>, baseline: Map<String, Int>, acknowle
  * 빈 교실 기록의 묶음을 고정된 순서로 나열하고, 그 뒤에 감시 중 원래 있던 것으로 판단된 묶음
  * (같은 공유기의 다른 주소, 확인함으로 표시한 것)을 처음 잡힌 순서로 붙인다. 사라져도 줄은 남는다.
  */
-private fun knownGroups(devices: List<TrackedDevice>, baseline: Map<String, Int>, acknowledged: Set<String>, baselineWifi: Set<String>,
+private fun knownGroups(devices: List<TrackedDevice>, baseline: Map<String, Int>, acknowledged: Map<String, Int>, baselineWifi: Set<String>,
     samples: List<SnapshotSignal>): List<KnownGroup> {
     val byStrength = compareByDescending<TrackedDevice> { it.rssiEma ?: Double.NEGATIVE_INFINITY }
-    val members = devices.filterNot { it.source == ScanSource.BLE && it.hints.primary == SignalHint.APPLE_FIND_MY }.groupBy { it.groupKey }
+    val members = devices.filterNot { (it.source == ScanSource.BLE && it.hints.primary == SignalHint.APPLE_FIND_MY) || it.glasses != null }.groupBy { it.groupKey }
     fun row(key: String, sample: SnapshotSignal?): KnownGroup {
         val all = members[key].orEmpty()
         return KnownGroup(key, sample, baseline[key] ?: 0, all.filter { it.presence != SignalPresence.HISTORY }.sortedWith(byStrength), all.maxByOrNull { it.lastSeenMs })
@@ -127,3 +136,29 @@ private fun knownGroups(devices: List<TrackedDevice>, baseline: Map<String, Int>
         .entries.sortedWith(compareBy({ entry -> entry.value.minOf { it.firstSeenMs } }, { it.key })).map { row(it.key, null) }
     return fromEmptyRoom + later
 }
+
+/** 이번 감시 동안 잡힌 AI 안경 신호 한 건. 사라진 뒤에도 남는다. */
+data class GlassesSighting(
+    val device: TrackedDevice,
+    val evidence: GlassesEvidence,
+    /** 지금 잡히는 중(최근 몇 초 안에 받음) */
+    val live: Boolean,
+    /** 감독관이 확인함으로 표시함 */
+    val acknowledged: Boolean,
+    /** 빈 교실 기록에도 같은 묶음이 있었음. 감독관·직원의 기기일 수 있다. */
+    val inEmptyRoom: Boolean,
+)
+
+/**
+ * AI 안경 신호는 짧게만 잡히는 경우가 많아 한 번이라도 받으면 바로 알리고, 사라져도 기록에 남긴다.
+ * 순서: 지금 잡히는 것 → 확실한 것 → 최근에 잡힌 것.
+ */
+fun glassesSightings(devices: List<TrackedDevice>, acknowledged: Set<String>, baseline: Map<String, Int> = emptyMap()): List<GlassesSighting> =
+    devices.mapNotNull { device ->
+        device.glasses?.let { evidence ->
+            GlassesSighting(device, evidence, device.presence != SignalPresence.HISTORY, device.trackingKey in acknowledged, device.groupKey in baseline)
+        }
+    }.sortedWith(compareBy<GlassesSighting> { !it.live }.thenBy { it.evidence.confidence.ordinal }.thenByDescending { it.device.lastSeenMs })
+
+/** 경보에 올릴 안경: 지금 잡히고, 아직 확인하지 않은 것. */
+val List<GlassesSighting>.alerting: List<GlassesSighting> get() = filter { it.live && !it.acknowledged }

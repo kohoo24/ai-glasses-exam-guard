@@ -10,6 +10,9 @@ import com.classroom.rfdetector.core.DeviceIdentityResolver
 import com.classroom.rfdetector.core.DeviceTracker
 import com.classroom.rfdetector.core.DistanceClass
 import com.classroom.rfdetector.core.GeigerController
+import com.classroom.rfdetector.core.GlassesSighting
+import com.classroom.rfdetector.core.alerting
+import com.classroom.rfdetector.core.glassesSightings
 import com.classroom.rfdetector.core.RfObservation
 import com.classroom.rfdetector.core.ScanSession
 import com.classroom.rfdetector.core.SignalPresence
@@ -89,8 +92,21 @@ class AppViewModel(private val app: Context) : ViewModel() {
     private var problemsCheckedAtMs = 0L
     /** 위치 찾기 대상(trackingKey). 지정하면 근접 진동이 이 기기를 따른다. */
     val findTarget = MutableStateFlow<String?>(null)
-    /** 감독관이 "확인함"으로 표시한 묶음(groupKey). 이번 감시 동안만 유지한다. */
-    val acknowledged = MutableStateFlow<Set<String>>(emptySet())
+    /** 감독관이 "확인함"으로 표시한 묶음(groupKey)과 그때 잡히던 개수. 이번 감시 동안만 유지한다. */
+    val acknowledged = MutableStateFlow<Map<String, Int>>(emptyMap())
+    /**
+     * 빈 교실 기록 없이 AI 안경 신호와 전송용 와이파이만 보는 감시. 수험생이 이미 앉아 있어도 쓸 수 있다.
+     * 빈 교실 비교 목록은 보여 주지 않는다.
+     */
+    val quickMode = MutableStateFlow(false)
+    /** 이번 감시 동안 잡힌 AI 안경 신호. 사라진 뒤에도 남는다. */
+    val glasses = MutableStateFlow<List<GlassesSighting>>(emptyList())
+    /** 감독관이 "확인함"으로 표시한 안경 신호(trackingKey). */
+    val glassesConfirmed = MutableStateFlow<Set<String>>(emptySet())
+    /** 새 안경 신호를 받았을 때 진동으로 알린다. */
+    val alertVibrate = MutableStateFlow(true)
+    /** 이미 진동으로 알린 안경 신호(trackingKey). 같은 신호로 되풀이해 울리지 않는다. */
+    private val alerted = mutableSetOf<String>()
     private var pausedAtMs: Long? = null
     private val silent = SilentMode(app)
     /** 방해 금지 권한이 없어 휴대폰을 자동으로 무음으로 바꾸지 못하는 상태. */
@@ -102,6 +118,8 @@ class AppViewModel(private val app: Context) : ViewModel() {
     private var refreshJob: Job? = null
 
     init {
+        // 지난번 감시가 끝나기 전에 앱이 강제로 닫혔다면 휴대폰 무음이 남아 있을 수 있다. 원래대로 돌린다.
+        runCatching { silent.recoverAfterAbnormalExit() }
         scope.launch {
             identityResolver = withContext(Dispatchers.IO) {
                 fun rows(file: String) = app.assets.open(file).bufferedReader().useLines { lines ->
@@ -140,7 +158,29 @@ class AppViewModel(private val app: Context) : ViewModel() {
         return !LocationManagerCompat.isLocationEnabled(lm)
     }
 
-    fun startScan() = begin(resumedPauseAtMs = null)
+    /** 빈 교실 기록 → 비교 감시. */
+    fun startScan() {
+        if (scanning.value) return
+        quickMode.value = false
+        begin(resumedPauseAtMs = null)
+    }
+
+    /** 빈 교실 기록 없이 AI 안경 신호를 바로 감시한다. */
+    fun startQuick() {
+        if (scanning.value) return
+        quickMode.value = true
+        baselineSnapshot.value = null
+        begin(resumedPauseAtMs = null)
+    }
+
+    /** 바로 탐지를 끝내고 처음 화면으로 돌아간다. */
+    fun exitQuick() {
+        stopScan()
+        quickMode.value = false
+        scanSession.value = null
+        glasses.value = emptyList()
+        resetBaseline()
+    }
 
     /** 앱이 화면 밖으로 나가면 수신을 멈추되, 돌아오면 같은 감시를 이어 간다. */
     fun pauseForBackground() {
@@ -161,7 +201,10 @@ class AppViewModel(private val app: Context) : ViewModel() {
             scanSession.value = paused.copy(pauses = paused.pauses + 1,
                 pausedMs = paused.pausedMs + (System.currentTimeMillis() - resumedPauseAtMs!!).coerceAtLeast(0))
         } else {
-            acknowledged.value = emptySet()
+            acknowledged.value = emptyMap()
+            glassesConfirmed.value = emptySet()
+            glasses.value = emptyList()
+            alerted.clear()
             tracker.clear()
             _devices.value = emptyList()
             watch.value = WatchView()
@@ -274,10 +317,21 @@ class AppViewModel(private val app: Context) : ViewModel() {
         startScan()
     }
 
+    /** 지금 잡히는 개수까지만 확인한 것으로 둔다. 같은 묶음에서 더 늘어나면 다시 알린다. */
     fun acknowledge(groupKey: String) {
-        acknowledged.value += groupKey
+        val view = watch.value
+        val count = (view.wifi + view.bluetooth + view.far).firstOrNull { it.key == groupKey }?.devices?.size ?: 1
+        acknowledged.value += groupKey to maxOf(count, acknowledged.value[groupKey] ?: 0)
         refresh() // 다음 갱신 주기를 기다리지 않고 목록에서 바로 뺀다.
     }
+
+    /** 안경 신호를 확인함으로 표시한다. 기록에는 남고 경보에서만 빠진다. */
+    fun confirmGlasses(trackingKey: String) {
+        glassesConfirmed.value += trackingKey
+        refresh()
+    }
+
+    fun setAlertVibrate(on: Boolean) { alertVibrate.value = on }
 
     fun setGeiger(on: Boolean) {
         if (on && !scanning.value) return
@@ -289,6 +343,7 @@ class AppViewModel(private val app: Context) : ViewModel() {
     fun setSim(on: Boolean) {
         if (simMode.value == on) return
         if (scanning.value) stopScan()
+        quickMode.value = false
         simMode.value = on
         tracker.clear()
         _devices.value = emptyList()
@@ -300,6 +355,10 @@ class AppViewModel(private val app: Context) : ViewModel() {
         if (scanning.value && simMode.value) sim.addDevice()
     }
 
+    fun simAddGlasses() {
+        if (scanning.value && simMode.value) sim.addGlasses()
+    }
+
     private fun refresh() {
         val now = System.currentTimeMillis()
         healthTick.value = now
@@ -309,6 +368,10 @@ class AppViewModel(private val app: Context) : ViewModel() {
         _devices.value = list
         val view = if (baselineSet.value) watchView(list, baselineGroups, acknowledged.value, now, baselineWifi, baselineSamples) else WatchView()
         watch.value = view
+        val sightings = glassesSightings(list, glassesConfirmed.value, baselineGroups)
+        glasses.value = sightings
+        val fresh = sightings.alerting.map { it.device.trackingKey }.filter { alerted.add(it) }
+        if (fresh.isNotEmpty() && scanning.value && alertVibrate.value) geiger.alertPulse()
         geiger.setClass(list.firstOrNull { it.trackingKey == findTarget.value && it.presence == SignalPresence.RECENT }?.distanceClass ?: DistanceClass.UNKNOWN)
         // 설정 상태 확인은 1초에 한 번이면 충분하다.
         if (now - problemsCheckedAtMs >= 1_000) {

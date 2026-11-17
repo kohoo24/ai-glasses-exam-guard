@@ -60,6 +60,11 @@ class GeigerController(context: Context) {
         }
     }
 
+    /** 새 AI 안경 신호를 받았을 때: 짧게 세 번. 위치 찾기 진동과 구분된다. */
+    fun alertPulse() {
+        runCatching { vibrator.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 180, 120, 180, 120, 180), -1)) }
+    }
+
     fun stop() {
         job?.cancel()
         job = null

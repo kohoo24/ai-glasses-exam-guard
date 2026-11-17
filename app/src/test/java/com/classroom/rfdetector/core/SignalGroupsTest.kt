@@ -16,7 +16,7 @@ class SignalGroupsTest {
     private fun baselineAt(nowMs: Long) = baselineGroupCounts(
         SignalSnapshot.capture("A", nowMs, false, tracker.snapshot(nowMs, includeInactive = true)))
 
-    private fun view(baseline: Map<String, Int>, nowMs: Long, acknowledged: Set<String> = emptySet()) =
+    private fun view(baseline: Map<String, Int>, nowMs: Long, acknowledged: Map<String, Int> = emptyMap()) =
         watchView(tracker.snapshot(nowMs, includeInactive = true), baseline, acknowledged, nowMs)
 
     @Test fun sameDeviceWithAChangedAddressIsNotCountedAgain() {
@@ -64,19 +64,21 @@ class SignalGroupsTest {
         assertEquals(0, view(baseline, 200_000).count)
         // 확인함으로 표시한 묶음은 주소가 바뀌어도 다시 뜨지 않는다.
         ble("BB:00:00:00:00:77", 300_000, name = "Galaxy Buds2 Pro", ids = setOf(117), hints = emptySet())
-        assertEquals(0, view(baseline, 301_000, acknowledged = setOf("BLE:name:galaxy buds2 pro")).count)
+        assertEquals(0, view(baseline, 301_000, acknowledged = mapOf("BLE:name:galaxy buds2 pro" to 1)).count)
     }
 
     @Test fun wifiIsJudgedByNameAndNewNamesAlertImmediately() {
         wifi("10:00:00:00:00:01", 0, "SCHOOL")
         wifi("10:00:00:00:00:02", 0, null)
-        val baseline = baselineAt(1_000)
-        assertEquals(mapOf("WIFI:name:school" to 1, "WIFI:hidden" to 1), baseline)
-        // 같은 이름의 다른 주소(5GHz, 다른 층 공유기)와 이름 없는 와이파이 추가는 원래 있던 것이다.
+        val snapshot = SignalSnapshot.capture("A", 1_000, false, tracker.snapshot(1_000, includeInactive = true))
+        val baseline = baselineGroupCounts(snapshot)
+        val routers = baselineWifiAddresses(snapshot)
+        assertEquals(mapOf("WIFI:name:school" to 1, "WIFI:hidden:10:00:00:00:00:02" to 1), baseline)
+        // 같은 이름의 다른 주소(5GHz, 다른 층 공유기)와, 같은 공유기가 낸 이름 없는 와이파이는 원래 있던 것이다.
         wifi("10:00:00:00:00:03", 100_000, "SCHOOL"); wifi("10:00:00:00:00:04", 100_000, null); wifi("10:00:00:00:00:01", 100_000, "SCHOOL")
-        assertEquals(0, view(baseline, 101_000).count)
-        wifi("20:00:00:00:00:01", 130_000, "Galaxy S24 1234", rssi = -55)
-        val hotspot = view(baseline, 131_000).wifi.single()
+        assertEquals(0, watchView(tracker.snapshot(101_000, includeInactive = true), baseline, emptyMap(), 101_000, routers).count)
+        wifi("2a:11:22:33:44:01", 130_000, "Galaxy S24 1234", rssi = -55)
+        val hotspot = watchView(tracker.snapshot(131_000, includeInactive = true), baseline, emptyMap(), 131_000, routers).wifi.single()
         assertTrue(hotspot.alert)
         assertEquals(0, hotspot.baselineCount)
     }
@@ -93,8 +95,9 @@ class SignalGroupsTest {
         // 전혀 다른 임의 주소의 이름 없는 와이파이는 새 전파다.
         wifi("da:a1:19:3b:7c:01", 100_000, null, rssi = -50)
         val devices = tracker.snapshot(101_000, includeInactive = true)
-        assertEquals("Without the router list both would be flagged", 2, watchView(devices, baseline, emptySet(), 101_000).wifi.size)
-        val view = watchView(devices, baseline, emptySet(), 101_000, routers)
+        // 이름을 숨긴 와이파이는 주소별로 보므로, 공유기 목록 없이는 숨긴 두 개와 손님용 이름이 모두 뜬다.
+        assertEquals("Without the router list all three would be flagged", 3, watchView(devices, baseline, emptyMap(), 101_000).wifi.size)
+        val view = watchView(devices, baseline, emptyMap(), 101_000, routers)
         assertEquals("da:a1:19:3b:7c:01", view.wifi.single().strongest.key)
     }
 
@@ -108,7 +111,7 @@ class SignalGroupsTest {
         val samples = baselineSamples(snapshot)
         val order = listOf("WIFI:name:school", "BLE:kind:76:APPLE_ACTIVE", "BLE:name:class tv")
         assertEquals("Wi-Fi first, then by strength when recorded; Find My beacons have their own bucket", order, samples.map { it.groupKey })
-        fun rows(nowMs: Long) = watchView(tracker.snapshot(nowMs, includeInactive = true), counts, emptySet(), nowMs, baselineWifiAddresses(snapshot), samples).knownGroups
+        fun rows(nowMs: Long) = watchView(tracker.snapshot(nowMs, includeInactive = true), counts, emptyMap(), nowMs, baselineWifiAddresses(snapshot), samples).knownGroups
 
         val first = rows(1_000)
         assertEquals(order, first.map { it.key })
@@ -126,9 +129,9 @@ class SignalGroupsTest {
 
         // 같은 공유기의 다른 주소가 뒤늦게 잡히면 맨 뒤에 붙고, 사라져도 줄은 남는다.
         wifi("12:00:00:00:00:01", 700_000, null)
-        assertEquals(order + "WIFI:hidden", rows(701_000).map { it.key })
+        assertEquals(order + "WIFI:hidden:12:00:00:00:00:01", rows(701_000).map { it.key })
         val gone = rows(900_000)
-        assertEquals(order + "WIFI:hidden", gone.map { it.key })
+        assertEquals(order + "WIFI:hidden:12:00:00:00:00:01", gone.map { it.key })
         assertEquals(0, gone.last().live.size)
     }
 
@@ -145,5 +148,54 @@ class SignalGroupsTest {
         assertEquals(2, result.findMy.size)
         assertEquals("BLE:name:far watch", result.far.single().key)
         assertEquals(0, result.count)
+    }
+
+    @Test fun aHiddenNetworkFromAnotherDeviceIsFlaggedEvenIfTheRoomHadOne() {
+        wifi("10:00:00:00:00:02", 0, null)
+        val snapshot = SignalSnapshot.capture("A", 1_000, false, tracker.snapshot(1_000, includeInactive = true))
+        // 이름을 숨긴 핫스팟(임의 주소). 예전에는 "이름 없는 와이파이" 한 묶음으로 처리돼 영영 뜨지 않았다.
+        wifi("da:a1:19:3b:7c:01", 100_000, null, rssi = -50)
+        val result = watchView(tracker.snapshot(101_000, includeInactive = true), baselineGroupCounts(snapshot), emptyMap(), 101_000, baselineWifiAddresses(snapshot))
+        assertEquals("da:a1:19:3b:7c:01", result.wifi.single().strongest.key)
+    }
+
+    @Test fun confirmingAGroupAcceptsOnlyTheCountAtThatMoment() {
+        ble("AA:00:00:00:00:01", 0, ids = emptySet(), hints = emptySet())
+        val baseline = baselineAt(1_000)
+        // 이름 없는 기기 한 대가 늘어 감독관이 확인했다(확인 당시 2대).
+        val t = 100_000L
+        listOf(0L, 10_000L, 20_000L, 30_000L, 40_000L).forEach { ble("AA:00:00:00:00:01", t + it, ids = emptySet(), hints = emptySet()); ble("AA:00:00:00:00:02", t + it, ids = emptySet(), hints = emptySet()) }
+        assertEquals(1, view(baseline, t + 41_000).count)
+        val confirmed = mapOf("BLE:unknown" to 2)
+        assertEquals(0, view(baseline, t + 41_000, confirmed).count)
+        // 그 뒤 이름 없는 기기가 하나 더 들어오면 다시 알린다. 예전에는 묶음 전체가 꺼져 뜨지 않았다.
+        listOf(50_000L, 60_000L, 70_000L, 80_000L, 90_000L).forEach { step ->
+            listOf("01", "02", "03").forEach { ble("AA:00:00:00:00:$it", t + step, ids = emptySet(), hints = emptySet()) }
+        }
+        val again = view(baseline, t + 91_000, confirmed).bluetooth.single()
+        assertEquals(2, again.baselineCount)
+        assertEquals(3, again.devices.size)
+    }
+
+    @Test fun aiGlassesAreAlertedAtOnceKeptAfterTheyVanishAndKeptOutOfTheOtherLists() {
+        ble("AA:00:00:00:00:01", 0)
+        val baseline = baselineAt(1_000)
+        // Ray-Ban Meta: 이름 없이 Luxottica 회사 코드만, 켜는 순간 2초 동안만 광고하고 사라진다.
+        ble("EE:00:00:00:00:01", 100_000, ids = setOf(0x0D53), hints = emptySet())
+        ble("EE:00:00:00:00:01", 102_000, ids = setOf(0x0D53), hints = emptySet())
+        val now = tracker.snapshot(102_500, includeInactive = true)
+        val sightings = glassesSightings(now, emptySet(), baseline)
+        assertEquals(1, sightings.alerting.size)
+        assertEquals(GlassesConfidence.STRONG, sightings.single().evidence.confidence)
+        assertEquals("Glasses are not also listed as an ordinary new signal", 0, watchView(now, baseline, emptyMap(), 102_500).count)
+        // 1분 뒤 신호가 없어도 기록에는 남고, 경보에서만 빠진다.
+        val later = glassesSightings(tracker.snapshot(160_000, includeInactive = true), emptySet(), baseline)
+        assertEquals(0, later.alerting.size)
+        assertFalse(later.single().live)
+        // 확인함으로 표시하면 잡히는 중이어도 경보에서 빠진다.
+        ble("EE:00:00:00:00:01", 200_000, ids = setOf(0x0D53), hints = emptySet())
+        val confirmed = glassesSightings(tracker.snapshot(200_500, includeInactive = true), setOf("BLE:EE:00:00:00:00:01"), baseline)
+        assertTrue(confirmed.single().acknowledged)
+        assertEquals(0, confirmed.alerting.size)
     }
 }

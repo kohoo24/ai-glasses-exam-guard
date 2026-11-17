@@ -6,6 +6,7 @@ package com.classroom.rfdetector.core
  */
 enum class SignalHint(val label: String) {
     GLASSES("스마트 안경"),
+    META_SERVICE("Meta 안경·헤드셋 서비스 신호"),
     EARPHONES("무선 이어폰·헤드셋"),
     APPLE_AUDIO("Apple·Beats 이어폰"),
     WATCH("스마트워치"),
@@ -49,11 +50,17 @@ fun bleHints(advertisement: ByteArray?): Set<SignalHint> {
                 0x25 -> hints += SignalHint.EARPHONES
                 0x29 -> hints += SignalHint.HEARING_AID
             }
-            0x02, 0x03 -> if ((0 until data.size - 1 step 2).any { u16(it) == FAST_PAIR_UUID }) hints += SignalHint.FAST_PAIR
-            0x16 -> if (data.size >= 2 && u16(0) == FAST_PAIR_UUID) hints += SignalHint.FAST_PAIR
-            0xFF -> if (data.size >= 3) when (u16(0)) {
-                APPLE -> hints += appleHints(data.copyOfRange(2, data.size))
-                MICROSOFT -> if (data[2].toInt() == 0x01) hints += SignalHint.WINDOWS
+            0x02, 0x03 -> (0 until data.size - 1 step 2).map { u16(it) }.forEach { uuid ->
+                if (uuid == FAST_PAIR_UUID) hints += SignalHint.FAST_PAIR
+                if (uuid == META_GLASSES_SERVICE) hints += SignalHint.META_SERVICE
+            }
+            0x16 -> if (data.size >= 2) when (u16(0)) {
+                FAST_PAIR_UUID -> hints += SignalHint.FAST_PAIR
+                META_GLASSES_SERVICE -> hints += SignalHint.META_SERVICE
+            }
+            0xFF -> if (data.size >= 2) when (u16(0)) {
+                APPLE -> if (data.size >= 3) hints += appleHints(data.copyOfRange(2, data.size))
+                MICROSOFT -> if (data.size >= 3 && data[2].toInt() == 0x01) hints += SignalHint.WINDOWS
             }
         }
         index += length + 1

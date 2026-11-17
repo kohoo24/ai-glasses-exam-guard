@@ -21,6 +21,9 @@ class RadioSimulator {
         var x: Double,
         var y: Double,
         val txDbm: Double = -59.0,
+        /** 이름을 알리지 않는 기기 */
+        val nameless: Boolean = false,
+        val ids: Set<Int>? = null,
     )
 
     val devices = mutableListOf(
@@ -34,7 +37,13 @@ class RadioSimulator {
     private val rnd = Random()
 
     fun reset() {
-        devices.removeAll { it.key.startsWith("sim-extra-") }
+        devices.removeAll { it.key.startsWith("sim-extra-") || it.key.startsWith("sim-glasses-") }
+    }
+
+    /** 이름 없이 Luxottica(Ray-Ban Meta) 회사 코드만 알리는 가상 AI 안경. */
+    fun addGlasses() {
+        val index = devices.count { it.key.startsWith("sim-glasses-") } + 1
+        devices.add(VDev("sim-glasses-$index", "", ScanSource.BLE, false, 0.8, 1.6, nameless = true, ids = setOf(0x0D53)))
     }
 
     fun addDevice() {
@@ -52,12 +61,12 @@ class RadioSimulator {
             RfObservation(
                 key = d.key,
                 source = d.source,
-                name = d.name.takeIf { !d.hidden },
+                name = d.name.takeIf { !d.hidden && !d.nameless },
                 rssi = rssi.toInt(),
                 txPower = null,
                 hidden = d.hidden,
                 timestampMs = now,
-                manufacturerIds = when {
+                manufacturerIds = d.ids ?: when {
                     d.key == "sim-airpods" || d.key.startsWith("sim-extra-") -> setOf(76)
                     d.key == "sim-buds" -> setOf(117)
                     else -> emptySet()

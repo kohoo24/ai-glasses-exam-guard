@@ -114,6 +114,47 @@ class GuardFlowTest {
         } finally { vm.shutdown() }
     }
 
+    @Test fun quickModeAlertsOnAiGlassesWithoutAnEmptyRoomRecord() {
+        val vm = launch()
+        try {
+            compose.onNodeWithText("AI 안경 바로 탐지 시작").assertIsDisplayed().performClick()
+            compose.waitUntil(10_000) { vm.devices.value.size == 5 }
+            waitForText("AI 안경 신호 없음")
+            saveScreen("quick-1-clear")
+            // 빈 교실 비교 없이도 이어폰 같은 다른 기기는 알리지 않는다.
+            compose.runOnIdle { vm.simAddDevice(); shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(1)) }
+            compose.onNodeWithText("AI 안경 신호 없음").assertExists()
+            // 이름 없이 Luxottica 회사 코드만 알리는 안경이 켜진다.
+            compose.runOnIdle { vm.simAddGlasses(); shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(1)) }
+            waitForText("AI 안경 신호 1개")
+            saveScreen("quick-2-glasses")
+            compose.onAllNodesWithText("AI 안경 신호")[0].performClick()
+            compose.onNodeWithText("근거: 안경 회사 코드 0x0D53").assertExists()
+            saveScreen("quick-3-find")
+            compose.onNodeWithText("확인함\n경보에서 빼기").performClick()
+            waitForText("AI 안경 신호 없음")
+            // 확인한 신호는 기록에 남는다.
+            compose.onNodeWithText("이번 감시 중 잡혔던 안경 신호 1건").assertExists()
+            compose.onNodeWithText("감시 끝내기").performClick()
+            compose.onNodeWithText("끝내기").performClick()
+            compose.onNodeWithText("감시를 끝냈습니다").assertExists()
+            compose.onNodeWithText("처음 화면으로").performClick()
+            compose.onNodeWithText("AI 안경 바로 탐지 시작").assertIsDisplayed()
+            assertTrue(vm.glasses.value.isEmpty())
+        } finally { vm.shutdown() }
+    }
+
+    @Test fun glassesAlsoAlertDuringEmptyRoomComparison() {
+        val vm = launch()
+        try {
+            recordEmptyRoom(vm)
+            compose.runOnIdle { vm.simAddGlasses(); shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(1)) }
+            waitForText("AI 안경 신호 1개")
+            saveScreen("guard-7-glasses")
+            assertEquals(0, vm.watch.value.count)
+        } finally { vm.shutdown() }
+    }
+
     @Test fun guideExplainsWhatTheAppCannotCatch() {
         val vm = launch()
         try {

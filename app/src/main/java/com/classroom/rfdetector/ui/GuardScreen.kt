@@ -31,13 +31,16 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-private enum class GuardPhase { READY, COLLECT, WATCH, ENDED }
+private enum class GuardPhase { READY, COLLECT, WATCH, ENDED, QUICK }
 
 private const val COLLECT_SECONDS = 120
 private val okDim = Color(0xFF12301F)
 private val warnDim = Color(0xFF3A2910)
+private val alarm = Color(0xFFFF6B6B)
 
 private fun clock(timeMs: Long): String = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(timeMs))
+private fun dayClock(timeMs: Long): String = SimpleDateFormat("M월 d일 HH:mm", Locale.KOREAN).format(Date(timeMs))
+private fun ago(nowMs: Long, thenMs: Long): String = ((nowMs - thenMs).coerceAtLeast(0) / 1000).let { s -> if (s < 60) "${s}초 전" else "${s / 60}분 전" }
 private fun minSec(seconds: Int) = if (seconds >= 60) "${seconds / 60}분 ${seconds % 60}초" else "${seconds}초"
 
 /**
@@ -45,7 +48,7 @@ private fun minSec(seconds: Int) = if (seconds >= 60) "${seconds / 60}분 ${seco
  * 빈 교실에 없던 블루투스·와이파이가 지금 잡히는지를 보여 준다.
  */
 @Composable
-fun GuardScreen(vm: AppViewModel, permissionMissing: Boolean, onStart: () -> Unit, onRequestPermissions: () -> Unit, onOpenSettings: () -> Unit, onFind: (String) -> Unit) {
+fun GuardScreen(vm: AppViewModel, permissionMissing: Boolean, onStart: () -> Unit, onStartQuick: () -> Unit, onRequestPermissions: () -> Unit, onOpenSettings: () -> Unit, onFind: (String) -> Unit) {
     val devices by vm.devices.collectAsState()
     val scanning by vm.scanning.collectAsState()
     val simulation by vm.simMode.collectAsState()
@@ -60,6 +63,11 @@ fun GuardScreen(vm: AppViewModel, permissionMissing: Boolean, onStart: () -> Uni
     val problems by vm.problems.collectAsState()
     val silenceMissing by vm.silenceMissing.collectAsState()
     val airplaneOff by vm.airplaneOff.collectAsState()
+    val quick by vm.quickMode.collectAsState()
+    val glasses by vm.glasses.collectAsState()
+    val vibrate by vm.alertVibrate.collectAsState()
+    val glassesAlert = glasses.alerting
+    var logOpen by rememberSaveable { mutableStateOf(false) }
     var openGroup by remember { mutableStateOf<String?>(null) }
     var farOpen by rememberSaveable { mutableStateOf(false) }
     var findMyOpen by rememberSaveable { mutableStateOf(false) }
@@ -68,6 +76,7 @@ fun GuardScreen(vm: AppViewModel, permissionMissing: Boolean, onStart: () -> Uni
     var confirmRestart by remember { mutableStateOf(false) }
 
     val phase = when {
+        quick -> GuardPhase.QUICK
         scanning && baselineSet -> GuardPhase.WATCH
         scanning -> GuardPhase.COLLECT
         baseline != null -> GuardPhase.ENDED
@@ -95,32 +104,35 @@ fun GuardScreen(vm: AppViewModel, permissionMissing: Boolean, onStart: () -> Uni
     }
 
     Column(Modifier.fillMaxSize()) {
-        GuardSteps(phase)
+        if (phase != GuardPhase.QUICK && phase != GuardPhase.READY) GuardSteps(phase)
         LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             when (phase) {
                 GuardPhase.READY -> {
                     item {
                         GuardPanel {
-                            Text("수험생이 들어오기 전,\n빈 교실에서 시작하세요", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                            Text("빈 교실의 블루투스와 와이파이를 먼저 기록합니다. 그 뒤에 새로 잡히는 것만 알려 드립니다.", color = RfColors.textDim)
+                            Text("AI 안경 바로 탐지", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                            Text("수험생이 이미 앉아 있어도 바로 시작할 수 있습니다. Ray-Ban Meta·Oakley Meta 같은 AI 안경이 내는 블루투스 신호가 잡히면 맨 위에 빨간색으로 띄우고 진동으로 알립니다.", color = RfColors.textDim)
+                            GuardHowTo("1", "입실이 끝나면 바로 시작하고 시험이 끝날 때까지 화면을 켜 두기")
+                            GuardHowTo("2", "안경을 켜거나 바꿔 쓰는 순간 신호가 잠깐 나옵니다. 사라져도 기록에 남습니다")
+                            GuardHowTo("3", "신호가 뜨면 눌러서 걸으며 가까운 쪽을 찾고, 안경을 직접 확인")
                         }
                     }
                     item {
                         GuardPanel {
-                            GuardHowTo("1", "빈 교실에서 2분 측정하고 기록 저장")
-                            GuardHowTo("2", "시험 중에는 이 화면을 켜 두기 · 전원 버튼을 누르거나 다른 앱으로 가면 감시가 멈춤")
-                            GuardHowTo("3", "새 전파가 뜨면 눌러서 다가가며 확인")
+                            Text("빈 교실 비교 감시", fontWeight = FontWeight.Bold)
+                            Text("수험생이 들어오기 전 빈 교실에서 2분 기록해 두면, AI 안경 말고도 그 뒤에 새로 잡히는 이어폰·워치·핫스팟까지 알려 드립니다. AI 안경 경보는 여기서도 똑같이 뜹니다.", color = RfColors.textDim, style = MaterialTheme.typography.bodySmall)
                         }
                     }
                     saved?.let { record ->
                         item {
                             OutlinedButton(onClick = { vm.useSavedBaseline(); onStart() }, modifier = Modifier.fillMaxWidth()) {
-                                Text("${clock(record.capturedAtMs)}에 저장한 기록으로 바로 감시")
+                                Text("${dayClock(record.capturedAtMs)}에 저장한 빈 교실 기록으로 감시")
                             }
                         }
                     }
                 }
                 GuardPhase.COLLECT -> {
+                    glassesItems(glasses, glassesAlert, logOpen, { logOpen = !logOpen }, tick, onFind)
                     item {
                         GuardPanel {
                             Text(if (collected) "충분히 모았습니다" else "빈 교실 전파를 모으는 중", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
@@ -146,9 +158,10 @@ fun GuardScreen(vm: AppViewModel, permissionMissing: Boolean, onStart: () -> Uni
                     }
                     item { OutlinedButton(onClick = { vm.stopScan() }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp), shape = RoundedCornerShape(16.dp)) { Text("초기화") } }
                 }
+                GuardPhase.QUICK -> Unit
                 GuardPhase.WATCH, GuardPhase.ENDED -> {
                     val watching = phase == GuardPhase.WATCH
-                    val found = watch.count > 0
+                    val found = watch.count > 0 || glassesAlert.isNotEmpty()
                     item {
                         val incomplete = watching && problems.isNotEmpty()
                         Surface(color = if (!watching || incomplete) RfColors.surfaceAlt else if (found) warnDim else okDim, shape = RoundedCornerShape(20.dp)) {
@@ -156,12 +169,13 @@ fun GuardScreen(vm: AppViewModel, permissionMissing: Boolean, onStart: () -> Uni
                                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                                     val accent = if (!watching) RfColors.textDim else if (found || incomplete) RfColors.warning else RfColors.ok
                                     Box(Modifier.size(48.dp).background(accent, CircleShape), contentAlignment = Alignment.Center) {
-                                        if (watching && found) Text("${watch.count}", color = RfColors.bg, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.headlineSmall)
+                                        if (watching && found) Text("${watch.count + glassesAlert.size}", color = RfColors.bg, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.headlineSmall)
                                         else if (incomplete) Text("!", color = RfColors.bg, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.headlineSmall)
                                         else RfGlyph(RfSymbol.CHECK, size = 28.dp, color = RfColors.bg)
                                     }
                                     Text(when {
                                         !watching -> "감시를 끝냈습니다"
+                                        glassesAlert.isNotEmpty() -> "AI 안경 신호 ${glassesAlert.size}개"
                                         found -> "새 전파 ${watch.count}개 발견"
                                         incomplete -> "감시가 완전하지 않습니다"
                                         else -> "새 전파 없음"
@@ -169,6 +183,7 @@ fun GuardScreen(vm: AppViewModel, permissionMissing: Boolean, onStart: () -> Uni
                                 }
                                 Text(if (watching) "감시 중 · ${minSec(elapsed)} 경과" else "지금은 전파를 받지 않습니다")
                                 if (watching) Text(when {
+                                    glassesAlert.isNotEmpty() -> "AI 안경이 내는 블루투스 신호가 잡혔습니다. 아래 빨간 줄을 눌러 다가가며 찾고, 안경을 직접 확인하세요."
                                     found -> "빈 교실에 없던 전파가 지금 잡히고 있습니다. 줄을 눌러 다가가며 세기를 확인하세요. 사라지면 목록에서 빠집니다."
                                     incomplete -> "아래 문제를 해결하기 전까지는 전파가 있어도 표시되지 않을 수 있습니다."
                                     else -> "지금 잡히는 전파는 모두 빈 교실 기록에 있던 것입니다."
@@ -177,6 +192,8 @@ fun GuardScreen(vm: AppViewModel, permissionMissing: Boolean, onStart: () -> Uni
                         }
                     }
                     examModeItems(airplaneOff && !simulation, silenceMissing && !simulation)
+                    glassesItems(glasses, glassesAlert, logOpen, { logOpen = !logOpen }, tick, onFind)
+                    if (watching) item { VibrateRow(vibrate, vm::setAlertVibrate) }
                     if (watching) {
                         item { Text("이 화면이 켜져 있는 동안에만 감시합니다. 화면은 자동으로 꺼지지 않으니 전원 버튼을 누르거나 다른 앱으로 가지 마세요. 충전기를 꽂아 두면 좋습니다.${if (silenceMissing || simulation) "" else " 감시 중에는 전화·알림·알람이 울리지 않게 휴대폰을 무음으로 바꿔 둡니다."}", color = RfColors.textDim, style = MaterialTheme.typography.bodySmall) }
                         problemItems(problems)
@@ -202,13 +219,25 @@ fun GuardScreen(vm: AppViewModel, permissionMissing: Boolean, onStart: () -> Uni
                     }
                 }
             }
+            if (phase == GuardPhase.QUICK) quickItems(vm, scanning, glasses, glassesAlert, devices, elapsed, session, problems, airplaneOff && !simulation,
+                silenceMissing && !simulation, vibrate, logOpen, { logOpen = !logOpen }, tick, onFind)
             error?.let { message -> item { Text(message, color = RfColors.warning, style = MaterialTheme.typography.bodySmall) } }
         }
         Surface(color = RfColors.surface) {
             Column(Modifier.padding(horizontal = 20.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                if (phase == GuardPhase.WATCH || phase == GuardPhase.ENDED) Text("이 앱은 와이파이와 저전력 블루투스(BLE) 신호만 봅니다. 아무것도 잡히지 않아도 부정행위가 없다는 뜻은 아닙니다. LTE만 쓰는 기기는 보이지 않습니다.", color = RfColors.textDim, style = MaterialTheme.typography.labelSmall)
+                if (phase == GuardPhase.WATCH || phase == GuardPhase.ENDED || phase == GuardPhase.QUICK) Text("이 앱은 와이파이와 저전력 블루투스(BLE) 신호만 봅니다. 아무것도 잡히지 않아도 부정행위가 없다는 뜻은 아닙니다. LTE만 쓰는 기기는 보이지 않습니다.", color = RfColors.textDim, style = MaterialTheme.typography.labelSmall)
                 when (phase) {
-                    GuardPhase.READY -> MainButton("빈 교실 측정 시작", onClick = onStart)
+                    GuardPhase.READY -> {
+                        MainButton("AI 안경 바로 탐지 시작", onClick = onStartQuick)
+                        OutlinedButton(onClick = onStart, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp), shape = RoundedCornerShape(16.dp)) { Text("빈 교실 측정 시작") }
+                    }
+                    GuardPhase.QUICK -> if (scanning) {
+                        Button(onClick = { confirmStop = true }, modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp), shape = RoundedCornerShape(16.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = RfColors.surfaceAlt, contentColor = RfColors.textPrimary)) { Text("감시 끝내기", fontWeight = FontWeight.Bold) }
+                    } else {
+                        MainButton("다시 바로 탐지", onClick = onStartQuick)
+                        OutlinedButton(onClick = { vm.exitQuick() }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp), shape = RoundedCornerShape(16.dp)) { Text("처음 화면으로") }
+                    }
                     GuardPhase.COLLECT -> MainButton(if (collected || elapsed >= COLLECT_SECONDS) "빈 교실 기록 저장" else "빈 교실 기록 저장 · ${minSec(COLLECT_SECONDS - elapsed)} 뒤",
                         enabled = devices.isNotEmpty() && !busy && collected) { vm.takeBaseline() }
                     GuardPhase.WATCH -> Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -230,7 +259,7 @@ fun GuardScreen(vm: AppViewModel, permissionMissing: Boolean, onStart: () -> Uni
         confirmButton = { TextButton(onClick = { confirmRestart = false; if (blocked) { vm.stopScan(); vm.resetBaseline() } else vm.restartFromEmptyRoom() }) { Text("다시 측정") } },
         dismissButton = { TextButton(onClick = { confirmRestart = false }) { Text("취소") } })
     if (confirmStop) AlertDialog(onDismissRequest = { confirmStop = false }, title = { Text("감시를 끝낼까요?") },
-        text = { Text("끝내면 전파를 더 받지 않습니다. 빈 교실 기록은 남아 있어 같은 기록으로 다시 감시할 수 있습니다.") },
+        text = { Text(if (quick) "끝내면 전파를 더 받지 않습니다. 이번에 잡힌 안경 신호 기록은 처음 화면으로 돌아가기 전까지 남아 있습니다." else "끝내면 전파를 더 받지 않습니다. 빈 교실 기록은 남아 있어 같은 기록으로 다시 감시할 수 있습니다.") },
         confirmButton = { TextButton(onClick = { confirmStop = false; vm.stopScan() }) { Text("끝내기") } },
         dismissButton = { TextButton(onClick = { confirmStop = false }) { Text("계속 감시") } })
 }
@@ -249,16 +278,30 @@ fun FindScreen(vm: AppViewModel, trackingKey: String, onBack: () -> Unit) {
     val live = device.presence != SignalPresence.HISTORY
     val accent = if (live) classAccent(device.distanceClass) else RfColors.textDim
     // 새 전파로 올라온 것만 "확인함"으로 뺄 수 있다. 원래 있던 전파는 뺄 목록이 없다.
-    val flagged = (watch.wifi + watch.bluetooth + watch.far).any { it.key == device.groupKey }
+    val sightings by vm.glasses.collectAsState()
+    val glassesEvidence = device.glasses
+    val glassesOpen = glassesEvidence != null && sightings.none { it.device.trackingKey == device.trackingKey && it.acknowledged }
+    val flagged = glassesEvidence != null || (watch.wifi + watch.bluetooth + watch.far).any { it.key == device.groupKey }
     Column(Modifier.fillMaxSize()) {
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Box(Modifier.size(46.dp).background(if (flagged) warnDim else RfColors.surfaceAlt, CircleShape), contentAlignment = Alignment.Center) { RfGlyph(symbol, size = 26.dp, color = if (flagged) RfColors.warning else RfColors.primary) }
+                Box(Modifier.size(46.dp).background(if (glassesEvidence != null) RfColors.dangerDim else if (flagged) warnDim else RfColors.surfaceAlt, CircleShape), contentAlignment = Alignment.Center) {
+                    RfGlyph(symbol, size = 26.dp, color = if (glassesEvidence != null) alarm else if (flagged) RfColors.warning else RfColors.primary)
+                }
                 Column {
                     Text(cardLabels(device).first, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     if (!flagged) Text("빈 교실 기록에 있던 전파", color = RfColors.primary, style = MaterialTheme.typography.labelMedium)
                     Text(if (kind in unknownKinds) cardLabels(device).second else advertisedName(device.key, device.displayName)?.let { "기기가 알린 이름: $it" } ?: "이름을 알리지 않는 기기",
                         color = RfColors.textDim, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+            glassesEvidence?.let { evidence ->
+                Surface(color = RfColors.dangerDim, shape = RoundedCornerShape(14.dp)) {
+                    Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("${evidence.confidence.label} · ${evidence.brand}", color = alarm, fontWeight = FontWeight.Bold)
+                        Text("근거: ${evidence.reason}", color = RfColors.textPrimary, style = MaterialTheme.typography.bodyMedium)
+                        Text("휴대폰과 연결된 안경은 신호를 멈출 수 있어, 지금 안 잡혀도 가까이 있을 수 있습니다. 막대가 가장 높았던 자리 근처의 안경을 직접 확인하세요.", color = RfColors.textDim, style = MaterialTheme.typography.bodySmall)
+                    }
                 }
             }
             kindNote(device)?.let { Text(it) }
@@ -291,7 +334,8 @@ fun FindScreen(vm: AppViewModel, trackingKey: String, onBack: () -> Unit) {
         }
         Surface(color = RfColors.surface) {
             Row(Modifier.padding(horizontal = 20.dp, vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                if (flagged) OutlinedButton(onClick = { vm.acknowledge(device.groupKey); close() }, modifier = Modifier.weight(1f).heightIn(min = 56.dp), shape = RoundedCornerShape(16.dp)) { Text("확인함\n목록에서 빼기") }
+                if (glassesEvidence != null) { if (glassesOpen) OutlinedButton(onClick = { vm.confirmGlasses(device.trackingKey); close() }, modifier = Modifier.weight(1f).heightIn(min = 56.dp), shape = RoundedCornerShape(16.dp)) { Text("확인함\n경보에서 빼기") } }
+                else if (flagged) OutlinedButton(onClick = { vm.acknowledge(device.groupKey); close() }, modifier = Modifier.weight(1f).heightIn(min = 56.dp), shape = RoundedCornerShape(16.dp)) { Text("확인함\n목록에서 빼기") }
                 Button(onClick = close, modifier = Modifier.weight(1f).heightIn(min = 56.dp), shape = RoundedCornerShape(16.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = RfColors.surfaceAlt, contentColor = RfColors.textPrimary)) { Text("목록으로", fontWeight = FontWeight.Bold) }
             }
@@ -303,8 +347,21 @@ fun FindScreen(vm: AppViewModel, trackingKey: String, onBack: () -> Unit) {
 @Composable
 fun GuideScreen() {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Surface(color = RfColors.dangerDim, shape = RoundedCornerShape(18.dp)) {
+            Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("AI 안경 탐지", fontWeight = FontWeight.Bold, color = alarm)
+                Text("AI 안경이 내보내는 블루투스 신호의 회사 코드(Luxottica·Meta·Snap 등), 안경 종류 값, 제품명(Ray-Ban Meta, 갤럭시 글래스, Rokid, RayNeo 등)으로 알아봅니다. 빈 교실 기록이 없어도 바로 알립니다.", style = MaterialTheme.typography.bodyMedium)
+                GuideList(
+                    "Ray-Ban Meta 2세대는 휴대폰과 연결되면 신호를 멈춘다고 알려져 있습니다. 켜는 순간, 다시 연결하는 순간에 잠깐 잡히므로 입실 때부터 시험이 끝날 때까지 화면을 켜 두세요.",
+                    "검사 뒤에 안경을 바꿔 쓰는 경우가 실제로 있었습니다. 시험 시작 직후와 쉬는 시간 뒤에 기록을 꼭 확인하세요.",
+                    "신호는 흉내 낼 수 있고, 옆 교실·복도의 안경도 잡힙니다. 경보는 안경을 직접 확인하라는 표시일 뿐 증거가 아닙니다.",
+                    "갤럭시 글래스·중국산 안경은 이름으로만 알아봅니다. 이름을 알리지 않으면 놓칠 수 있습니다.",
+                )
+            }
+        }
         GuardPanel {
             Text("사용 순서", fontWeight = FontWeight.Bold)
+            GuardHowTo("0", "수험생이 이미 있다면 ‘AI 안경 바로 탐지’로 시작합니다. 아래 1~3은 빈 교실 비교 감시입니다.")
             GuardHowTo("1", "수험생이 들어오기 전, 빈 교실에서 2분 측정하고 기록을 저장합니다.")
             GuardHowTo("2", "시험 중에는 화면을 켜 둡니다. 빈 교실에 없던 전파가 잡히면 주황색으로 바뀝니다.")
             GuardHowTo("3", "줄을 눌러 걸어가며 막대가 늘어나는 쪽을 찾습니다.")
@@ -364,10 +421,11 @@ private fun GuideList(vararg items: String, numbered: Boolean = false) {
     }
 }
 
-private fun plainKind(device: TrackedDevice) = plainKind(device.source, device.key, device.displayName, device.hints)
+private fun plainKind(device: TrackedDevice) = plainKind(device.source, device.key, device.displayName, device.hints, device.manufacturerIds)
 
 /** 종류는 기기가 스스로 알린 이름과 광고 데이터에서 읽은 추정이다. */
-private fun plainKind(source: ScanSource, address: String, name: String, hints: Set<SignalHint>): Pair<String, RfSymbol> {
+private fun plainKind(source: ScanSource, address: String, name: String, hints: Set<SignalHint>, ids: Set<Int> = emptySet()): Pair<String, RfSymbol> {
+    glassesEvidence(source, address, name, ids, hints)?.let { return it.confidence.label to RfSymbol.GLASSES }
     val advertised = advertisedName(address, name)
     val audio = if (source == ScanSource.BLE) AudioNameCatalog.match(advertised) else null
     val wearable = if (source == ScanSource.BLE) WearableNameCatalog.match(advertised) else null
@@ -390,6 +448,10 @@ private fun plainKind(source: ScanSource, address: String, name: String, hints: 
 
 private val unknownKinds = setOf("블루투스 기기 · 종류 모름", "와이파이 · 공유기나 휴대폰 핫스팟")
 
+/** 안경 신호의 둘째 줄: 제조사 후보, 이름이 있으면 이름. */
+private fun glassesSubtitle(device: TrackedDevice, evidence: GlassesEvidence) =
+    listOfNotNull(evidence.brand.takeUnless { it == "제조사 모름" }, advertisedName(device.key, device.displayName)).joinToString(" · ").ifEmpty { "이름을 알리지 않는 기기" }
+
 /** 카드의 제목과 둘째 줄. 종류를 알면 종류가 제목이고, 모르면 기기가 알린 이름(없으면 제조사)이 제목이다. */
 private fun cardLabels(kind: String, advertised: String?, maker: String?, wifi: Boolean): Pair<String, String> = when {
     kind !in unknownKinds -> kind to (advertised ?: maker ?: "이름 없음")
@@ -398,7 +460,7 @@ private fun cardLabels(kind: String, advertised: String?, maker: String?, wifi: 
     else -> kind to "이름 없음"
 }
 
-private fun cardLabels(device: TrackedDevice) = cardLabels(plainKind(device).first, advertisedName(device.key, device.displayName), maker(device), device.source == ScanSource.WIFI)
+private fun cardLabels(device: TrackedDevice) = device.glasses?.let { it.confidence.label to glassesSubtitle(device, it) } ?: cardLabels(plainKind(device).first, advertisedName(device.key, device.displayName), maker(device), device.source == ScanSource.WIFI)
 
 private fun maker(device: TrackedDevice): String? = device.identity.advertisedCompanies.firstOrNull() ?: device.identity.macOrganization
 
@@ -477,7 +539,7 @@ private fun LazyListScope.knownRows(group: KnownGroup, open: Boolean, onToggle: 
 private fun KnownCard(group: KnownGroup, open: Boolean, onClick: () -> Unit) {
     val shown = group.live.firstOrNull() ?: group.last
     val sample = group.sample
-    val (kind, symbol) = if (shown != null) plainKind(shown) else plainKind(sample!!.source, sample.address, sample.name, sample.hints)
+    val (kind, symbol) = if (shown != null) plainKind(shown) else plainKind(sample!!.source, sample.address, sample.name, sample.hints, sample.manufacturerIds)
     val (title, subtitle) = if (shown != null) cardLabels(shown)
         else cardLabels(kind, advertisedName(sample!!.address, sample.name), sample.manufacturer.takeUnless { it == "제조사 미확인" }, sample.source == ScanSource.WIFI)
     val live = group.live.isNotEmpty()
@@ -512,7 +574,7 @@ private fun MainButton(text: String, enabled: Boolean = true, onClick: () -> Uni
 @Composable
 private fun GuardSteps(phase: GuardPhase) {
     // 감시를 끝낸 뒤에는 두 단계 모두 완료로 보여 준다.
-    val current = when (phase) { GuardPhase.READY, GuardPhase.COLLECT -> 1; GuardPhase.WATCH -> 2; GuardPhase.ENDED -> 3 }
+    val current = when (phase) { GuardPhase.READY, GuardPhase.COLLECT, GuardPhase.QUICK -> 1; GuardPhase.WATCH -> 2; GuardPhase.ENDED -> 3 }
     Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         listOf("빈 교실 기록", "시험 중 감시").forEachIndexed { index, title ->
             val step = index + 1
@@ -550,7 +612,8 @@ private fun GuardNotice(title: String, body: String, action: (@Composable () -> 
 private fun LazyListScope.examModeItems(airplaneOff: Boolean, silenceMissing: Boolean) {
     if (airplaneOff) item(key = "exam-airplane") {
         val context = LocalContext.current
-        GuardNotice("비행기 모드가 꺼져 있습니다", "전화나 문자가 오면 감시 화면이 가려지고 감시가 멈춥니다. 비행기 모드를 켠 뒤 와이파이와 블루투스만 다시 켜 주세요. 꺼져 있으면 측정을 시작할 수 없습니다.") {
+        GuardNotice("비행기 모드가 꺼져 있습니다", "전화나 문자가 오면 감시 화면이 가려지고 감시가 멈춥니다. 비행기 모드를 켠 뒤 와이파이와 블루투스만 다시 켜 주세요. " +
+            if (BuildConfig.DEBUG) "개발용(디버그) 빌드라 측정은 시작되지만, 이 빌드는 실제 시험 감독에 쓰면 안 됩니다." else "꺼져 있으면 측정을 시작할 수 없습니다.") {
             TextButton(onClick = { context.startActivity(android.content.Intent(android.provider.Settings.ACTION_AIRPLANE_MODE_SETTINGS)) }) { Text("비행기 모드 설정 열기") }
         }
     }
@@ -691,6 +754,111 @@ private fun SignalCard(device: TrackedDevice, groupNote: String? = null, calm: B
                 ProximityBars(device)
                 Text(proximityLabel(device), color = if (live) classAccent(device.distanceClass) else RfColors.textDim, style = MaterialTheme.typography.labelMedium)
             }
+        }
+    }
+}
+
+/** AI 안경 경보(지금 잡히는 것)와 이번 감시 동안 잡힌 기록. 빈 교실 기록과 상관없이 모든 감시 화면 맨 위에 둔다. */
+private fun LazyListScope.glassesItems(all: List<GlassesSighting>, alerting: List<GlassesSighting>, logOpen: Boolean, onToggleLog: () -> Unit, nowMs: Long, onFind: (String) -> Unit) {
+    if (alerting.isNotEmpty()) {
+        item(key = "glasses-title") { GuardSectionTitle(RfSymbol.GLASSES, "AI 안경", "지금 잡히는 신호 ${alerting.size}개") }
+        items(alerting, key = { "glasses-${it.device.trackingKey}" }) { sighting -> GlassesCard(sighting, nowMs) { onFind(sighting.device.trackingKey) } }
+    }
+    val past = all.filterNot { it in alerting }
+    if (past.isNotEmpty()) {
+        item(key = "glasses-log") { FoldRow("이번 감시 중 잡혔던 안경 신호 ${past.size}건", logOpen, onToggleLog) }
+        if (logOpen) items(past, key = { "glasses-log-${it.device.trackingKey}" }) { sighting -> GlassesCard(sighting, nowMs) { onFind(sighting.device.trackingKey) } }
+    }
+}
+
+@Composable
+private fun GlassesCard(sighting: GlassesSighting, nowMs: Long, onClick: () -> Unit) {
+    val device = sighting.device
+    val hot = sighting.live && !sighting.acknowledged
+    Surface(onClick = onClick, color = if (hot) RfColors.dangerDim else RfColors.surface, shape = RoundedCornerShape(16.dp)) {
+        Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Box(Modifier.size(44.dp).background(if (hot) alarm else RfColors.surfaceAlt, CircleShape), contentAlignment = Alignment.Center) {
+                RfGlyph(RfSymbol.GLASSES, size = 24.dp, color = if (hot) RfColors.bg else RfColors.textDim)
+            }
+            Column(Modifier.weight(1f)) {
+                Text(sighting.evidence.confidence.label, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium, color = if (hot) alarm else RfColors.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(glassesSubtitle(device, sighting.evidence), color = RfColors.textDim, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall)
+                Text(buildList {
+                    add(if (sighting.live) "지금 잡히는 중" else "${ago(nowMs, device.lastSeenMs)} 마지막으로 잡힘")
+                    add("처음 ${clock(device.firstSeenMs)}")
+                    device.peakRssi?.let { add("가장 셀 때 $it dBm") }
+                    if (sighting.acknowledged) add("확인함")
+                    if (sighting.inEmptyRoom) add("빈 교실 때도 있던 신호")
+                }.joinToString(" · "), color = RfColors.textDim, maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall)
+            }
+            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                ProximityBars(device)
+                Text(proximityLabel(device), color = if (sighting.live) classAccent(device.distanceClass) else RfColors.textDim, style = MaterialTheme.typography.labelMedium)
+            }
+        }
+    }
+}
+
+@Composable
+private fun VibrateRow(on: Boolean, onChange: (Boolean) -> Unit) {
+    Surface(color = RfColors.surface, shape = RoundedCornerShape(16.dp)) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("새 안경 신호가 잡히면 진동", Modifier.weight(1f))
+            Switch(checked = on, onCheckedChange = onChange)
+        }
+    }
+}
+
+/** AI 안경 바로 탐지 화면. 빈 교실 비교 없이 안경 신호와 사진 전송에 쓰일 수 있는 와이파이만 본다. */
+private fun LazyListScope.quickItems(vm: AppViewModel, scanning: Boolean, glasses: List<GlassesSighting>, alerting: List<GlassesSighting>, devices: List<TrackedDevice>,
+    elapsed: Int, session: ScanSession?, problems: List<RadioProblem>, airplaneOff: Boolean, silenceMissing: Boolean, vibrate: Boolean,
+    logOpen: Boolean, onToggleLog: () -> Unit, nowMs: Long, onFind: (String) -> Unit) {
+    val found = alerting.isNotEmpty()
+    val incomplete = scanning && problems.isNotEmpty()
+    item(key = "quick-head") {
+        Surface(color = if (!scanning || incomplete) RfColors.surfaceAlt else if (found) RfColors.dangerDim else okDim, shape = RoundedCornerShape(20.dp)) {
+            Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                    val accent = if (!scanning) RfColors.textDim else if (found) alarm else if (incomplete) RfColors.warning else RfColors.ok
+                    Box(Modifier.size(48.dp).background(accent, CircleShape), contentAlignment = Alignment.Center) {
+                        if (scanning && found) Text("${alerting.size}", color = RfColors.bg, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.headlineSmall)
+                        else if (incomplete) Text("!", color = RfColors.bg, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.headlineSmall)
+                        else RfGlyph(RfSymbol.GLASSES, size = 28.dp, color = RfColors.bg)
+                    }
+                    Text(when {
+                        !scanning -> "감시를 끝냈습니다"
+                        found -> "AI 안경 신호 ${alerting.size}개"
+                        incomplete -> "감시가 완전하지 않습니다"
+                        else -> "AI 안경 신호 없음"
+                    }, Modifier.weight(1f), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = if (scanning) accent else RfColors.textPrimary)
+                }
+                Text(if (scanning) "AI 안경 바로 탐지 중 · ${minSec(elapsed)} 경과" else "지금은 전파를 받지 않습니다 · 이번에 잡힌 안경 신호 ${glasses.size}건")
+                if (scanning) Text(when {
+                    found -> "AI 안경이 내는 블루투스 신호가 잡혔습니다. 빨간 줄을 눌러 걸으며 막대가 늘어나는 쪽을 찾고, 안경을 직접 확인하세요."
+                    incomplete -> "아래 문제를 해결하기 전까지는 안경이 있어도 표시되지 않을 수 있습니다."
+                    else -> "휴대폰과 이미 연결된 안경은 신호를 멈출 수 있습니다. 안경을 켜거나 바꿔 쓰는 순간을 잡으려면 시험이 끝날 때까지 이 화면을 켜 두세요."
+                }, color = RfColors.textDim, style = MaterialTheme.typography.bodySmall)
+            }
+        }
+    }
+    if (scanning) problemItems(problems)
+    if (airplaneOff) examModeItems(true, false)
+    if (silenceMissing) examModeItems(false, true)
+    glassesItems(glasses, alerting, logOpen, onToggleLog, nowMs, onFind)
+    if (scanning) {
+        item(key = "quick-vibrate") { VibrateRow(vibrate, vm::setAlertVibrate) }
+        session?.takeIf { it.pauses > 0 }?.let {
+            item(key = "quick-paused") { GuardNotice("앱을 벗어나 있던 시간이 있습니다", "${it.pauses}회, 총 ${minSec((it.pausedMs / 1000).toInt())} 동안은 전파를 받지 못했습니다. 그동안 켜진 안경은 놓쳤을 수 있습니다.") }
+        }
+        val transfer = devices.filter { it.transferWifi && it.presence != SignalPresence.HISTORY }.sortedByDescending { it.rssiEma ?: Double.NEGATIVE_INFINITY }
+        item(key = "quick-wifi-title") { GuardSectionTitle(RfSymbol.WIFI, "와이파이", if (transfer.isEmpty()) "휴대폰 핫스팟·와이파이 다이렉트 없음" else "휴대폰 핫스팟·와이파이 다이렉트 ${transfer.size}개") }
+        if (transfer.isNotEmpty()) item(key = "quick-wifi-note") {
+            Text("안경이 사진을 휴대폰으로 넘길 때 쓰일 수 있는 와이파이입니다. 교실 프린터·TV도 와이파이 다이렉트를 쓰므로, 가까이 잡히는 것부터 확인하세요.", color = RfColors.textDim, style = MaterialTheme.typography.bodySmall)
+        }
+        items(transfer, key = { "quick-wifi-${it.trackingKey}" }) { device -> SignalCard(device) { onFind(device.trackingKey) } }
+        item(key = "quick-count") {
+            Text("주변에서 지금 잡히는 전파: 블루투스 ${devices.count { it.source == ScanSource.BLE && it.presence != SignalPresence.HISTORY }}개 · 와이파이 ${devices.count { it.source == ScanSource.WIFI && it.presence != SignalPresence.HISTORY }}개. 이어폰·워치 같은 다른 기기까지 보려면 빈 교실 비교 감시를 쓰세요.",
+                color = RfColors.textDim, style = MaterialTheme.typography.bodySmall)
         }
     }
 }

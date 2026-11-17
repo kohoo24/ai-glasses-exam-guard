@@ -49,14 +49,16 @@ fun App() {
     val lifecycle = (context as ComponentActivity).lifecycle
     var guide by rememberSaveable { mutableStateOf(false) }
     var findKey by rememberSaveable { mutableStateOf<String?>(null) }
-    var pendingStart by remember { mutableStateOf(false) }
+    /** 권한 창이 닫힌 뒤 시작할 감시. null이면 없음, true면 AI 안경 바로 탐지. */
+    var pendingStart by remember { mutableStateOf<Boolean?>(null) }
     val needed = remember { vm.requiredPermissions() }
     fun hasPermissions() = needed.all { ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED }
     var allGranted by remember { mutableStateOf(hasPermissions()) }
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
         allGranted = hasPermissions()
-        if (pendingStart && allGranted) vm.startScan()
-        pendingStart = false
+        val quick = pendingStart
+        if (quick != null && allGranted) { if (quick) vm.startQuick() else vm.startScan() }
+        pendingStart = null
     }
     DisposableEffect(lifecycle) {
         val observer = LifecycleEventObserver { _, event ->
@@ -78,10 +80,12 @@ fun App() {
         onDispose { window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) }
     }
     val openSettings = { context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.parse("package:${context.packageName}"))) }
-    val start = {
-        if (simMode || hasPermissions()) vm.startScan()
-        else { pendingStart = true; launcher.launch(needed.toTypedArray()) }
+    fun begin(quick: Boolean) {
+        if (simMode || hasPermissions()) { if (quick) vm.startQuick() else vm.startScan() }
+        else { pendingStart = quick; launcher.launch(needed.toTypedArray()) }
     }
+    val start = { begin(quick = false) }
+    val startQuick = { begin(quick = true) }
     val closeFind = { vm.findTarget.value = null; vm.setGeiger(false); findKey = null }
     BackHandler(enabled = guide || findKey != null) { if (findKey != null) closeFind() else guide = false }
 
@@ -98,7 +102,7 @@ fun App() {
                 when {
                     key != null -> FindScreen(vm, key, onBack = { findKey = null })
                     guide -> GuideScreen()
-                    else -> GuardScreen(vm, !allGranted, start, { launcher.launch(needed.toTypedArray()) }, openSettings, onFind = { findKey = it })
+                    else -> GuardScreen(vm, !allGranted, start, startQuick, { launcher.launch(needed.toTypedArray()) }, openSettings, onFind = { findKey = it })
                 }
             }
         }
