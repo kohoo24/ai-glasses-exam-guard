@@ -1,8 +1,6 @@
-<p align="center">
-  <img src="docs/images/icon.png" width="96" height="96" alt="KoriyoSCAN 아이콘">
-</p>
+# AI 안경 탐지
 
-# KoriyoSCAN
+> [KoriyoSCAN](https://github.com/reform-dev-team/exam-rf-guard)(Apache-2.0)을 고친 버전입니다. AI 안경 탐지, 화면 꺼짐 감시, 안경 신호 기록을 더했고 이름·아이콘·앱 ID를 바꿨습니다. 원 저작자와 관계가 없으며 원 저작자가 보증하지 않습니다. 바뀐 점은 [CHANGELOG](CHANGELOG.md)와 [NOTICE](NOTICE)에 있습니다.
 
 시험 감독관용 Android 앱입니다. 두 가지로 씁니다.
 
@@ -20,17 +18,17 @@
 | 화면 | 감독관 화면, 위치 찾기, 안내 |
 
 <p align="center">
-  <img src="docs/images/screen-1-ready.png" width="250" alt="빈 교실 기록 화면">
-  <img src="docs/images/screen-2-found.png" width="250" alt="시험 중 감시 화면에 새 전파 1개가 뜬 모습">
-  <img src="docs/images/screen-3-find.png" width="250" alt="위치 찾기 화면">
+  <img src="docs/images/screen-1-ready.png" width="250" alt="첫 화면: AI 안경 바로 탐지와 빈 교실 비교 감시">
+  <img src="docs/images/screen-2-found.png" width="250" alt="바로 탐지 화면에 AI 안경 신호 1개가 뜬 모습">
+  <img src="docs/images/screen-3-find.png" width="250" alt="안경 신호의 근거와 위치 찾기 화면">
 </p>
-<p align="center"><sub>자동 테스트가 가상 전파로 그린 실제 앱 화면입니다. 왼쪽부터 빈 교실 기록, 시험 중 감시, 위치 찾기.</sub></p>
+<p align="center"><sub>자동 테스트가 가상 전파로 그린 실제 앱 화면입니다. 왼쪽부터 첫 화면, AI 안경 경보, 근거와 위치 찾기.</sub></p>
 
 ## 상태
 
 - **현장 검증 전입니다.** 자동 테스트는 통과하지만 실제 시험장에서 얼마나 잡고 얼마나 놓치는지는 측정하지 않았습니다.
 - 시험 주관 기관의 지침이 감독관의 휴대폰 반입이나 사용을 제한할 수 있습니다. 쓰기 전에 해당 시험의 지침을 확인해야 합니다.
-- 실기기에서 써 본 결과는 [Issues](https://github.com/reform-dev-team/exam-rf-guard/issues)로 알려 주세요. 적는 방법은 [제보](#제보)에 있습니다.
+- 실기기에서 써 본 결과는 [Issues](https://github.com/kohoo24/ai-glasses-exam-guard/issues)로 알려 주세요. 적는 방법은 [제보](#제보)에 있습니다.
 
 ## AI 안경 탐지
 
@@ -189,7 +187,7 @@ APK는 `app/build/outputs/apk/debug/app-debug.apk`에 생깁니다. **디버그 
 - [이름 기반 제품 후보의 제품명 출처](docs/DEVICE-NAME-SOURCES.md)
 - [Android BLE 기기 탐색](https://developer.android.com/develop/connectivity/bluetooth/ble/find-ble-devices), [Android Wi-Fi 탐색과 제한](https://developer.android.com/develop/connectivity/wifi/wifi-scan)
 
-앱 아이콘의 캐릭터는 화성시 캐릭터 코리요입니다. 원저작자는 화성시이며 [공공누리 제1유형](https://www.kogl.or.kr/info/licenseType1.do)(출처표시) 조건으로 이용합니다. 아이콘의 3D 그림은 [KoriyoZIP](https://koriyozip.com/ko/)의 3D 스타일 재구성 이미지를 가공한 것으로 화성시의 공식 3D 원본이 아니며, 화성시나 KoriyoZIP이 이 앱을 제작·보증했다는 의미도 아닙니다.
+앱 아이콘은 이 저장소에서 새로 그린 것입니다. 원본 KoriyoSCAN의 코리요 아이콘은 쓰지 않습니다.
 
 제품명과 회사명은 관측 결과를 설명하기 위해 사용합니다. 해당 제조사가 이 앱을 인증하거나 보증했다는 의미는 아닙니다.
 
@@ -197,11 +195,13 @@ APK는 `app/build/outputs/apk/debug/app-debug.apk`에 생깁니다. **디버그 
 
 소스 코드는 [Apache License 2.0](LICENSE)으로 공개합니다. 누구나 사용·수정·재배포할 수 있으며, 저작권 표시와 라이선스 문구를 유지하고 고친 파일에는 고쳤다는 표시를 남겨야 합니다.
 
-이 라이선스는 코드에만 적용됩니다. 앱 아이콘(코리요), 앱에 포함한 등록부, "KoriyoSCAN"이라는 이름에는 각 권리자의 조건이 적용됩니다. 자세한 내용은 [NOTICE](NOTICE)에 있습니다.
+원본 KoriyoSCAN의 저작권 표시를 유지하며, 고친 내용은 [NOTICE](NOTICE)와 [CHANGELOG](CHANGELOG.md), git 기록에 남깁니다. 앱에 포함한 등록부에는 각 권리자의 조건이 적용됩니다.
 
 ## English
 
-KoriyoSCAN is an Android app for exam proctors. It records the Wi-Fi access points and Bluetooth Low Energy advertisements present in an empty room, then flags signals that were not in that record once the exam is under way, and helps walk toward one by signal strength.
+This is a modified version of KoriyoSCAN (Apache-2.0) that adds AI-glasses detection: it alerts on Bluetooth advertisements carrying eyewear company identifiers (Luxottica, Snap, Even Realities, Vuzix), the Meta glasses service code, the eyeglasses appearance value or glasses product names, keeps watching for them with the screen off, and keeps a shareable log. Ray-Ban Meta Gen 2 is reported to stop advertising once connected to a phone, so connected glasses may not be seen. Detection has not been verified with real glasses.
+
+Like the original, it also records the Wi-Fi access points and Bluetooth Low Energy advertisements present in an empty room, then flags signals that were not in that record once the exam is under way, and helps walk toward one by signal strength.
 
 It cannot detect every device. It only sees Wi-Fi access points and BLE advertisements, so it misses devices that use cellular data only, wired or record-only cameras, Bluetooth Classic devices, and anything that stops advertising once connected. It does not block signals and does not decide whether anyone cheated. Field accuracy has not been measured.
 

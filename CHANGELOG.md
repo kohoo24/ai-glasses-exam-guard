@@ -2,7 +2,7 @@
 
 ## 1.1.0
 
-AI 안경 대응판입니다.
+AI 안경 대응판입니다. [KoriyoSCAN](https://github.com/reform-dev-team/exam-rf-guard) 1.0.0(커밋 7916c91)을 고친 것이며, 이름을 "AI 안경 탐지"로, 앱 ID를 `io.github.kohoo24.aiglasses`로 바꾸고 아이콘을 새로 그렸습니다. 원본 앱과 따로 설치됩니다.
 
 - **AI 안경 바로 탐지**: 빈 교실 기록 없이 바로 시작합니다. 수험생이 앉아 있어도 쓸 수 있습니다.
 - **AI 안경 경보**: 안경 회사 코드(Luxottica·Snap·Even Realities·Vuzix), Meta 서비스 코드 `0xFD5F`, 안경 종류 값, 제품명으로 알아보고, 한 번만 잡혀도 맨 위에 빨간색으로 띄우고 진동으로 알립니다. Meta 회사 코드는 "AI 안경일 수 있는 신호"로 따로 표시합니다. 빈 교실 비교 감시에서도 똑같이 뜹니다.

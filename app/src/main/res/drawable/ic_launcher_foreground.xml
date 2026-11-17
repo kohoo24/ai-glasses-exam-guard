@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 안경과 신호 표시. 이 저장소에서 새로 그린 아이콘이다. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+    <path android:strokeColor="#5EE0C8" android:strokeWidth="5" android:strokeLineCap="round" android:fillColor="#00000000"
+        android:pathData="M28,58 m-12,0 a12,12 0 1,0 24,0 a12,12 0 1,0 -24,0 M80,58 m-12,0 a12,12 0 1,0 24,0 a12,12 0 1,0 -24,0 M40,56 Q54,48 68,56 M16,56 L22,44 M92,56 L86,44" />
+    <path android:strokeColor="#FF6B6B" android:strokeWidth="4" android:strokeLineCap="round" android:fillColor="#00000000"
+        android:pathData="M46,36 Q54,28 62,36 M40,30 Q54,16 68,30" />
+</vector>

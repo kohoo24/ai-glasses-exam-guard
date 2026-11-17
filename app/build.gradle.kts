@@ -9,7 +9,7 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.classroom.rfdetector"
+        applicationId = "io.github.kohoo24.aiglasses"
         minSdk = 29
         targetSdk = 35
         versionCode = 14

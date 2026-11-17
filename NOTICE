@@ -1,17 +1,26 @@
-KoriyoSCAN
+AI 안경 탐지 (ai-glasses-exam-guard)
 Copyright 2026 KoriyoSCAN contributors
+Copyright 2026 고호현 (modifications)
 
-Licensed under the Apache License, Version 2.0. The license covers the source
-code in this repository. It does not cover the items below, which remain under
-their owners' terms.
+This project is a modified version of KoriyoSCAN
+(https://github.com/reform-dev-team/exam-rf-guard, commit 7916c91),
+licensed under the Apache License, Version 2.0. It is not affiliated with or
+endorsed by the KoriyoSCAN authors.
 
-App icon
-  The character is Koriyo, the mascot of Hwaseong City (Republic of Korea).
-  Original author: Hwaseong City. Used under the Korea Open Government License
-  Type 1 (attribution): https://www.kogl.or.kr/info/licenseType1.do
-  The 3D artwork is adapted from a 3D-style rendition by KoriyoZIP
-  (https://koriyozip.com/ko/). It is not an official 3D asset of Hwaseong City.
-  Neither Hwaseong City nor KoriyoZIP made or endorses this app.
+Changes from the original
+  - AI glasses detection: alert on glasses company identifiers, the Meta
+    glasses service code, the glasses appearance value and product names,
+    without an empty-room record ("AI 안경 바로 탐지").
+  - Screen-off monitoring of glasses signals through a foreground service.
+  - A saved, shareable log of glasses signals per monitoring session.
+  - Fixes: "확인함" scope, hidden Wi-Fi grouping, restoring Do Not Disturb
+    after an abnormal exit.
+  - Renamed the app, changed the application ID, and replaced the icon.
+  Modified and added files are listed in CHANGELOG.md and in the git history.
+
+The original KoriyoSCAN name and Koriyo icon are not used in this project.
+The KoriyoSCAN NOTICE states that its name and icon are not licensed for use
+as another product's name or logo.
 
 Registry data shipped with the app (app/src/main/assets)
   mac-vendors.tsv: IEEE Registration Authority MA-L assignments.
@@ -19,6 +28,5 @@ Registry data shipped with the app (app/src/main/assets)
   See app/src/main/assets/REGISTRY-SOURCES.txt for sources and retained fields.
 
 Names
-  "KoriyoSCAN" and the app icon are not licensed for use as your own product
-  name or logo (Apache License 2.0, section 6). Product and company names that
-  appear in the code describe observed signals and do not imply endorsement.
+  Product and company names that appear in the code describe observed
+  signals and do not imply endorsement.

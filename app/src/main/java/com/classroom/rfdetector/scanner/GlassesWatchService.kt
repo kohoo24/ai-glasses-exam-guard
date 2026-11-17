@@ -104,7 +104,7 @@ class GlassesWatchService : Service() {
 
     private fun watchNotification(text: String): Notification = NotificationCompat.Builder(this, CHANNEL_WATCH)
         .setSmallIcon(android.R.drawable.stat_sys_data_bluetooth)
-        .setContentTitle("KoriyoSCAN")
+        .setContentTitle("AI 안경 탐지")
         .setContentText(text)
         .setContentIntent(openApp())
         .setOngoing(true)

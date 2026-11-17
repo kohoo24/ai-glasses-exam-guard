@@ -900,7 +900,7 @@ private fun PastLogCard(log: GlassesLogSession, onShare: () -> Unit) {
 /** 기록을 문자·메신저·메일로 보낸다. 앱은 인터넷을 쓰지 않고, 보낼 곳은 감독관이 고른다. */
 private fun shareLog(context: android.content.Context, log: GlassesLogSession) {
     val send = android.content.Intent(android.content.Intent.ACTION_SEND).setType("text/plain")
-        .putExtra(android.content.Intent.EXTRA_SUBJECT, "KoriyoSCAN AI 안경 신호 기록")
+        .putExtra(android.content.Intent.EXTRA_SUBJECT, "AI 안경 신호 기록")
         .putExtra(android.content.Intent.EXTRA_TEXT, log.shareText())
     runCatching { context.startActivity(android.content.Intent.createChooser(send, "기록 보내기")) }
 }

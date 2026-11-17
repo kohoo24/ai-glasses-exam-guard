@@ -1,4 +1,4 @@
-KoriyoSCAN identity registry data
+Identity registry data
 Retrieved 2026-11-16 (Asia/Seoul).
 
 mac-vendors.tsv: 24-bit MA-L assignments from IEEE Registration Authority.

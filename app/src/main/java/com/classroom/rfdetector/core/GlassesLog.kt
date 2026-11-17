@@ -114,7 +114,7 @@ fun GlassesLogSession.shareText(): String {
     val day = SimpleDateFormat("yyyy년 M월 d일 HH:mm", Locale.KOREAN)
     val time = SimpleDateFormat("HH:mm:ss", Locale.KOREAN)
     return buildString {
-        appendLine("KoriyoSCAN AI 안경 신호 기록")
+        appendLine("AI 안경 탐지 · AI 안경 신호 기록")
         appendLine("감시: ${if (quick) "AI 안경 바로 탐지" else "빈 교실 비교 감시"}")
         appendLine("시작 ${day.format(Date(startedAtMs))}" + (endedAtMs?.let { " · 끝 ${time.format(Date(it))}" } ?: " · 끝나지 않음(앱이 닫힘)"))
         if (entries.isEmpty()) appendLine("잡힌 AI 안경 신호: 없음")
